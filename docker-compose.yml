@@ -23,7 +23,7 @@ services:
     environment:
       POSTGRES_HOST: procoast-db
     ports:
-      - "8000:8000"
+      - "8010:8010"
     depends_on:
       procoast-db:
         condition: service_healthy
@@ -32,7 +32,7 @@ services:
     build: ./frontend
     container_name: procoast-fe
     ports:
-      - "3000:80"
+      - "3010:3010"
     depends_on:
       - procoast-be
 
