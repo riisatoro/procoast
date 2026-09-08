@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="lv">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ProCoat S1 — Pārvaldības platforma</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="extra.css" />
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="data.js"></script>
+<script src="systems.js"></script>
+<script type="text/babel" src="icons.jsx"></script>
+<script type="text/babel" src="period-picker.jsx"></script>
+<script type="text/babel" src="login.jsx"></script>
+<script type="text/babel" src="sidebar.jsx"></script>
+<script type="text/babel" src="topbar-notif.jsx"></script>
+<script type="text/babel" src="dashboard.jsx"></script>
+<script type="text/babel" src="calendar.jsx"></script>
+<script type="text/babel" src="calendar-settings.jsx"></script>
+<script type="text/babel" src="reports.jsx"></script>
+<script type="text/babel" src="tools-materials.jsx"></script>
+<script type="text/babel" src="archive.jsx"></script>
+<script type="text/babel" src="new-object.jsx"></script>
+<script type="text/babel" src="object-detail.jsx"></script>
+<script type="text/babel" src="worker-profile.jsx"></script>
+
+<script type="text/babel" data-presets="env,react">
+const { useState, useEffect } = React;
+
+const App = () => {
+  const [user, setUser] = useState(null);
+  const [section, setSection] = useState("dashboard");
+  const [showNewObj, setShowNewObj] = useState(false);
+  const [savedToast, setSavedToast] = useState(null);
+  const [mobileNav, setMobileNav] = useState(false);
+  const [showNotif, setShowNotif] = useState(false);
+  const [detailObjectId, setDetailObjectId] = useState(null);
+  const [profileUserId, setProfileUserId] = useState(null);
+  const [, setRev] = useState(0);
+
+  const isAdmin = user?.role === "ADMINISTRATORS";
+  const nextId = (window.PROCOAT_DATA.objects.reduce((m, o) => Math.max(m, o.id), 0) || 0) + 1;
+
+  // Lock body scroll when sidebar open on mobile
+  useEffect(() => {
+    document.body.style.overflow = mobileNav ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [mobileNav]);
+
+  const handleSaveObject = (obj) => {
+    window.PROCOAT_DATA.objects.push(obj);
+    setRev(r => r + 1);
+    setShowNewObj(false);
+    setSavedToast(`Objekts #${obj.id} ${obj.client} pievienots`);
+    setTimeout(() => setSavedToast(null), 2600);
+  };
+
+  const navigateSection = (s) => {
+    setDetailObjectId(null);
+    setProfileUserId(null);
+    setSection(s);
+  };
+
+  const openObjectDetail = (id) => {
+    setProfileUserId(null);
+    setDetailObjectId(id);
+    setSection("object-detail");
+    setMobileNav(false);
+  };
+  const openProfile = (id) => {
+    setDetailObjectId(null);
+    setProfileUserId(id);
+    setSection("profile");
+    setMobileNav(false);
+  };
+
+  if (!user) return <Login onLogin={(u) => { setUser(u); setSection(u.role === "ADMINISTRATORS" ? "dashboard" : "calendar"); }} />;
+
+  let content;
+  if (section === "object-detail" && detailObjectId) {
+    content = <ObjectDetail user={user} objectId={detailObjectId} onBack={() => navigateSection(isAdmin ? "dashboard" : "calendar")} onNavigate={navigateSection} />;
+  } else if (section === "profile" && profileUserId) {
+    content = <WorkerProfile user={user} profileUserId={profileUserId} onBack={() => navigateSection("users")} onNavigate={navigateSection} onSelectObject={openObjectDetail} />;
+  } else {
+    const sections = {
+      dashboard: <Dashboard user={user} onNavigate={navigateSection} onSelectObject={openObjectDetail} />,
+      calendar: <CalendarView user={user} onSelectObject={(o) => openObjectDetail(o.id)} />,
+      reports: <Reports user={user} />,
+      tools: <Tools user={user} />,
+      materials: <Materials user={user} />,
+      archive: <Archive user={user} />,
+      users: <UsersPage user={user} onOpenProfile={openProfile} />,
+    };
+    content = sections[section] || sections.calendar;
+  }
+
+  // Map "object-detail" / "profile" to the parent nav item visually
+  const navSection = section === "object-detail" ? "dashboard" : section === "profile" ? "users" : section;
+
+  return (
+    <div className="app">
+      <Sidebar
+        user={user}
+        currentSection={navSection}
+        onNavigate={navigateSection}
+        onLogout={() => setUser(null)}
+        mobileOpen={mobileNav}
+        onCloseMobile={() => setMobileNav(false)}
+        onOpenProfile={openProfile}
+      />
+      {mobileNav && <div className="sidebar-backdrop show" onClick={() => setMobileNav(false)} />}
+
+      <main className="main" data-screen-label={section}>
+        <MobileTopbar onOpenSidebar={() => setMobileNav(true)} />
+
+        {/* Floating bell — top-right, only when not on profile/login/detail */}
+        <div style={{position: "absolute", top: 24, right: 24, zIndex: 30}}>
+          <div className="bell-wrap">
+            <button className="bell-btn" onClick={() => setShowNotif(s => !s)} title="Paziņojumi">
+              <Icon name="bell" size={16} />
+              <span className="bell-badge">3</span>
+            </button>
+            {showNotif && <NotificationsPop onClose={() => setShowNotif(false)} />}
+          </div>
+        </div>
+
+        {content}
+      </main>
+
+      {isAdmin && (
+        <button className="fab" onClick={() => setShowNewObj(true)} title="Pievienot jaunu objektu">
+          <Icon name="plus" size={18} />
+          <span>Jauns objekts</span>
+        </button>
+      )}
+
+      {showNewObj && (
+        <NewObjectModal
+          nextId={nextId}
+          onClose={() => setShowNewObj(false)}
+          onSave={handleSaveObject}
+        />
+      )}
+
+      {savedToast && <div className="toast"><Icon name="check" size={14} /> {savedToast}</div>}
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

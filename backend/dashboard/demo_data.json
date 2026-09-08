@@ -1,0 +1,502 @@
+{
+  "users": [],
+  "objects": [
+    {
+      "id": 75,
+      "client": "Terēze Bērzupe",
+      "address": "Brīvības iela 142, Rīga",
+      "system": "Pārslas kāpnēm ar labošanu",
+      "totalM2": 300,
+      "doneM2": 201,
+      "status": "active",
+      "color": "#2C5F2E",
+      "startDate": "2026-04-15",
+      "endDate": "2026-05-20",
+      "tasks": [
+        {
+          "name": "Virsmas slīpēšana",
+          "unit": "m²",
+          "done": 300,
+          "total": 300
+        },
+        {
+          "name": "EP02 Color ieklāšana",
+          "unit": "m²",
+          "done": 100,
+          "total": 300
+        },
+        {
+          "name": "Pārslas beršana",
+          "unit": "m²",
+          "done": 50,
+          "total": 300
+        }
+      ],
+      "materials": [
+        {
+          "name": "EP02 Color",
+          "color": "RAL7001",
+          "needed": 150,
+          "taken": 100,
+          "perM2": 0.5
+        },
+        {
+          "name": "EP11",
+          "color": "—",
+          "needed": 300,
+          "taken": 0,
+          "perM2": 1.0
+        },
+        {
+          "name": "EP22",
+          "color": "—",
+          "needed": 150,
+          "taken": 150,
+          "perM2": 0.5
+        },
+        {
+          "name": "Akrila Pārslas",
+          "color": "Mix",
+          "needed": 210,
+          "taken": 70,
+          "perM2": 0.7
+        },
+        {
+          "name": "Kvarca smilts",
+          "color": "0.3-0.8mm",
+          "needed": 750,
+          "taken": 500,
+          "perM2": 2.5
+        }
+      ]
+    },
+    {
+      "id": 87,
+      "client": "AutoGurijs",
+      "address": "Krasta iela 30, Rīga",
+      "system": "Pretslīdoša epoksīda",
+      "totalM2": 40,
+      "doneM2": 40,
+      "status": "completed",
+      "color": "#F4A442",
+      "startDate": "2026-04-02",
+      "endDate": "2026-04-10",
+      "tasks": [
+        {
+          "name": "Virsmas slīpēšana",
+          "unit": "m²",
+          "done": 40,
+          "total": 40
+        },
+        {
+          "name": "EP12 ieklāšana",
+          "unit": "m²",
+          "done": 40,
+          "total": 40
+        },
+        {
+          "name": "Kvarca beršana",
+          "unit": "m²",
+          "done": 40,
+          "total": 40
+        }
+      ],
+      "materials": [
+        {
+          "name": "EP12",
+          "color": "—",
+          "needed": 40,
+          "taken": 40,
+          "perM2": 1.0
+        },
+        {
+          "name": "Kvarca smilts",
+          "color": "0.8-1.2mm",
+          "needed": 80,
+          "taken": 80,
+          "perM2": 2.0
+        },
+        {
+          "name": "PU-Satin",
+          "color": "—",
+          "needed": 12,
+          "taken": 12,
+          "perM2": 0.3
+        }
+      ]
+    },
+    {
+      "id": 76,
+      "client": "Maira Meļķe",
+      "address": "Mežciema iela 12, Rīga",
+      "system": "Gluda epoksīda",
+      "totalM2": 300,
+      "doneM2": 100,
+      "status": "active",
+      "color": "#5B7DB1",
+      "startDate": "2026-04-22",
+      "endDate": "2026-06-05",
+      "tasks": [
+        {
+          "name": "Virsmas slīpēšana",
+          "unit": "m²",
+          "done": 300,
+          "total": 300
+        },
+        {
+          "name": "EP02 ieklāšana",
+          "unit": "m²",
+          "done": 100,
+          "total": 300
+        },
+        {
+          "name": "Lakas klājums",
+          "unit": "m²",
+          "done": 0,
+          "total": 300
+        }
+      ],
+      "materials": [
+        {
+          "name": "EP02",
+          "color": "RAL7035",
+          "needed": 300,
+          "taken": 150,
+          "perM2": 1.0
+        },
+        {
+          "name": "EP11",
+          "color": "—",
+          "needed": 150,
+          "taken": 75,
+          "perM2": 0.5
+        },
+        {
+          "name": "PU-Satin",
+          "color": "—",
+          "needed": 90,
+          "taken": 30,
+          "perM2": 0.3
+        }
+      ]
+    },
+    {
+      "id": 89,
+      "client": "Atra Sistēma",
+      "address": "Daugavgrīvas šoseja 5",
+      "system": "Pretslīdoša epoksīda",
+      "totalM2": 10,
+      "doneM2": 2,
+      "status": "active",
+      "color": "#A66A8E",
+      "startDate": "2026-05-01",
+      "endDate": "2026-05-12",
+      "tasks": [
+        {
+          "name": "Virsmas slīpēšana",
+          "unit": "m²",
+          "done": 10,
+          "total": 10
+        },
+        {
+          "name": "EP12 ieklāšana",
+          "unit": "m²",
+          "done": 2,
+          "total": 10
+        }
+      ],
+      "materials": [
+        {
+          "name": "EP12",
+          "color": "—",
+          "needed": 10,
+          "taken": 5,
+          "perM2": 1.0
+        },
+        {
+          "name": "Kvarca smilts",
+          "color": "0.3-0.8mm",
+          "needed": 20,
+          "taken": 10,
+          "perM2": 2.0
+        }
+      ]
+    },
+    {
+      "id": 92,
+      "client": "BūveLat SIA",
+      "address": "Rūpniecības iela 1, Olaine",
+      "system": "Izlīdzinoša epoksīda",
+      "totalM2": 850,
+      "doneM2": 0,
+      "status": "planned",
+      "color": "#6E5B8A",
+      "startDate": "2026-05-20",
+      "endDate": "2026-07-15",
+      "tasks": [
+        {
+          "name": "Virsmas slīpēšana",
+          "unit": "m²",
+          "done": 0,
+          "total": 850
+        },
+        {
+          "name": "EP01 ieklāšana",
+          "unit": "m²",
+          "done": 0,
+          "total": 850
+        }
+      ],
+      "materials": [
+        {
+          "name": "EP01",
+          "color": "—",
+          "needed": 850,
+          "taken": 0,
+          "perM2": 1.0
+        },
+        {
+          "name": "Kvarca smilts",
+          "color": "0.1-0.3mm",
+          "needed": 1700,
+          "taken": 0,
+          "perM2": 2.0
+        }
+      ]
+    }
+  ],
+  "toolCategories": [
+    {
+      "title": "Ieklāšanas instrumenti",
+      "icon": "package",
+      "tools": [
+        {
+          "name": "Rullīši 10cm",
+          "recommended": "2/dienā"
+        },
+        {
+          "name": "Rullīši 25cm",
+          "recommended": "2/dienā"
+        },
+        {
+          "name": "Lielais rullis",
+          "recommended": "1/dienā"
+        },
+        {
+          "name": "Otiņas",
+          "recommended": "3/dienā"
+        },
+        {
+          "name": "Lāpstiņa gumijas",
+          "recommended": null
+        },
+        {
+          "name": "Lielā lāpstiņa",
+          "recommended": null
+        },
+        {
+          "name": "Miksera galva",
+          "recommended": null
+        },
+        {
+          "name": "Kāts",
+          "recommended": null
+        }
+      ]
+    },
+    {
+      "title": "Virsmas sagatavošanas instrumenti",
+      "icon": "settings",
+      "tools": [
+        {
+          "name": "Putekļu sūcējs",
+          "recommended": "1+"
+        },
+        {
+          "name": "Slīpmašīna mazā",
+          "recommended": null
+        },
+        {
+          "name": "Slīpmašīna lielā",
+          "recommended": null
+        },
+        {
+          "name": "Citi instrumenti",
+          "recommended": null
+        }
+      ]
+    },
+    {
+      "title": "Papildus aprīkojums",
+      "icon": "shield",
+      "tools": [
+        {
+          "name": "Cimdi",
+          "recommended": null
+        },
+        {
+          "name": "Skoča līmlentas",
+          "recommended": null
+        },
+        {
+          "name": "Miskastes maisi",
+          "recommended": null
+        },
+        {
+          "name": "Putekļu sūcēja maisi",
+          "recommended": null
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "id": 1,
+      "objectId": 75,
+      "title": "Terēze Bērzupe",
+      "system": "EP pārslas, 300m²",
+      "workers": [
+        "AK",
+        "KF"
+      ],
+      "color": "#2C5F2E",
+      "start": "2026-05-04",
+      "end": "2026-05-08"
+    },
+    {
+      "id": 2,
+      "objectId": 87,
+      "title": "AutoGurijs",
+      "system": "Pretslīde, 40m²",
+      "workers": [
+        "DB"
+      ],
+      "color": "#F4A442",
+      "start": "2026-05-04",
+      "end": "2026-05-06"
+    },
+    {
+      "id": 3,
+      "objectId": 76,
+      "title": "Maira Meļķe",
+      "system": "Gluda, 300m²",
+      "workers": [
+        "IG",
+        "MV"
+      ],
+      "color": "#5B7DB1",
+      "start": "2026-05-06",
+      "end": "2026-05-15"
+    },
+    {
+      "id": 4,
+      "objectId": 89,
+      "title": "Atra Sistēma",
+      "system": "Pretslīde, 10m²",
+      "workers": [
+        "JR"
+      ],
+      "color": "#A66A8E",
+      "start": "2026-05-11",
+      "end": "2026-05-12"
+    },
+    {
+      "id": 5,
+      "objectId": 75,
+      "title": "Terēze Bērzupe",
+      "system": "Pārslu beršana",
+      "workers": [
+        "AK",
+        "KF",
+        "DB"
+      ],
+      "color": "#2C5F2E",
+      "start": "2026-05-12",
+      "end": "2026-05-15"
+    },
+    {
+      "id": 6,
+      "objectId": 76,
+      "title": "Maira Meļķe",
+      "system": "Lakas klājums",
+      "workers": [
+        "IG"
+      ],
+      "color": "#5B7DB1",
+      "start": "2026-05-18",
+      "end": "2026-05-22"
+    },
+    {
+      "id": 7,
+      "objectId": 92,
+      "title": "BūveLat SIA",
+      "system": "Slīpēšana, 850m²",
+      "workers": [
+        "AK",
+        "KF",
+        "DB",
+        "IG"
+      ],
+      "color": "#6E5B8A",
+      "start": "2026-05-20",
+      "end": "2026-05-29"
+    },
+    {
+      "id": 8,
+      "objectId": 75,
+      "title": "Terēze Bērzupe",
+      "system": "Finiš slāņi",
+      "workers": [
+        "MV"
+      ],
+      "color": "#2C5F2E",
+      "start": "2026-05-25",
+      "end": "2026-05-28"
+    }
+  ],
+  "todayReports": [
+    {
+      "worker": "AK",
+      "objectId": 75,
+      "summary": "45m² EP22, 45m² Pārslas"
+    },
+    {
+      "worker": "KF",
+      "objectId": 76,
+      "summary": "30m² Slīpēšana, 30m² EP02"
+    },
+    {
+      "worker": "DB",
+      "objectId": 87,
+      "summary": "Pabeigts — finiš pārbaude"
+    },
+    {
+      "worker": "IG",
+      "objectId": 76,
+      "summary": "20m² EP02 ieklāšana"
+    }
+  ],
+  "holidays2026": [
+    {
+      "date": "2026-05-01",
+      "name": "Darba svētki"
+    },
+    {
+      "date": "2026-05-04",
+      "name": "Latvijas Republikas Neatkarības atjaunošanas diena"
+    },
+    {
+      "date": "2026-06-23",
+      "name": "Līgo diena"
+    },
+    {
+      "date": "2026-06-24",
+      "name": "Jāņu diena"
+    },
+    {
+      "date": "2026-11-18",
+      "name": "Latvijas Republikas proklamēšanas diena"
+    }
+  ],
+  "archive": []
+}
