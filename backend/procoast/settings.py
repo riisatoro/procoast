@@ -11,9 +11,10 @@ load_dotenv(BASE_DIR / ".env")
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-insecure-change-me")
 DEBUG = os.environ.get("DEBUG", "1").lower() in ("1", "true", "yes")
 ALLOWED_HOSTS = [
-    h.strip()
-    for h in os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
-    if h.strip()
+    "localhost",
+    "127.0.0.1",
+    "procoast-be",
+    "157.230.96.59",
 ]
 
 INSTALLED_APPS = [
@@ -106,18 +107,17 @@ SIMPLE_JWT = {
 
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOWED_ORIGINS = [
-    origin.strip()
-    for origin in os.environ.get(
-        "CORS_ALLOWED_ORIGINS",
-        "http://localhost:3010,http://127.0.0.1:3010",
-    ).split(",")
-    if origin.strip()
+    "http://localhost:3010",
+    "http://127.0.0.1:3010",
+    "http://157.230.96.59",
+    "http://157.230.96.59:3010",
 ]
 CSRF_TRUSTED_ORIGINS = [
-    origin.strip()
-    for origin in os.environ.get(
-        "CSRF_TRUSTED_ORIGINS",
-        "http://localhost:3010,http://127.0.0.1:3010,http://localhost:8010,http://127.0.0.1:8010",
-    ).split(",")
-    if origin.strip()
+    "http://localhost:3010",
+    "http://127.0.0.1:3010",
+    "http://localhost:8010",
+    "http://127.0.0.1:8010",
+    "http://157.230.96.59",
+    "http://157.230.96.59:3010",
+    "http://157.230.96.59:8010",
 ]
