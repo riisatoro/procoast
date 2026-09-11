@@ -13,9 +13,9 @@ import ProjectsPage from "./projects";
 import Archive from "./archive";
 import ObjectDetail from "./object-detail";
 import WorkerProfile from "./worker-profile";
+import NewObjectModal from "./new-object";
 import Icon from "./icons";
-import { setProcoatData } from "./data";
-import { clearSession, fetchDashboard, fetchMe, fetchNotifications, fetchUsers, getToken, onUnauthorized } from "./api";
+import { clearSession, createProject, fetchArchivedProjects, fetchMe, fetchNotifications, fetchProjects, getToken, onUnauthorized } from "./api";
 import { LanguageSwitch, useI18n } from "./i18n";
 import { rememberProject } from "./last-project";
 import { loadNotifSeen, saveNotifSeen, unreadCount } from "./notif-seen";
@@ -34,7 +34,7 @@ const MAIN_SECTIONS = new Set([
   "object-detail",
   "profile",
 ]);
-const ADMIN_ONLY_SECTIONS = new Set(["dashboard", "users"]);
+const ADMIN_ONLY_SECTIONS = new Set(["dashboard", "users", "archive"]);
 
 function defaultSection(user) {
   return user?.role === "ADMINISTRATORS" ? "dashboard" : "calendar";
@@ -77,13 +77,16 @@ const App = () => {
   const [ready, setReady] = useState(false);
   const [section, setSection] = useState("dashboard");
   const [savedToast, setSavedToast] = useState(null);
+  const [showNewObj, setShowNewObj] = useState(false);
+  const [nextId, setNextId] = useState(1);
+  const [creating, setCreating] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [showNotif, setShowNotif] = useState(false);
   const [detailObjectId, setDetailObjectId] = useState(null);
   const [profileUserId, setProfileUserId] = useState(null);
   const [notifItems, setNotifItems] = useState([]);
   const [notifSeen, setNotifSeen] = useState(loadNotifSeen);
-  const [, setRev] = useState(0);
+  const [rev, setRev] = useState(0);
 
   const isAdmin = user?.role === "ADMINISTRATORS";
 
@@ -126,9 +129,6 @@ const App = () => {
       try {
         const me = await fetchMe();
         if (me && !cancelled) {
-          const dash = await fetchDashboard();
-          const users = await fetchUsers();
-          setProcoatData({ ...dash, users });
           setUser(me);
           const nav = navForUser(me, readNav());
           setSection(nav.section);
@@ -147,9 +147,6 @@ const App = () => {
   }, []);
 
   const handleLogin = async (u) => {
-    const dash = await fetchDashboard();
-    const users = await fetchUsers();
-    setProcoatData({ ...dash, users });
     setUser(u);
     const home = defaultSection(u);
     setSection(home);
@@ -224,14 +221,14 @@ const App = () => {
     );
   } else {
     const sections = {
-      dashboard: <Dashboard user={user} onNavigate={navigateSection} onSelectObject={openObjectDetail} />,
-      calendar: <CalendarView user={user} />,
+      dashboard: <Dashboard key={rev} user={user} onNavigate={navigateSection} onSelectObject={openObjectDetail} />,
+      calendar: <CalendarView user={user} onSelectObject={openObjectDetail} />,
       reports: <Reports user={user} />,
       tools: <ToolsPage user={user} />,
       warehouses: <WarehousesPage user={user} />,
       materials: <MaterialsPage user={user} />,
       projects: <ProjectsPage user={user} />,
-      archive: <Archive user={user} />,
+      archive: <Archive user={user} onSelectObject={openObjectDetail} />,
       users: <UsersPage user={user} onOpenProfile={openProfile} />,
     };
     content = sections[section] || sections.calendar;
@@ -280,6 +277,46 @@ const App = () => {
 
         {content}
       </main>
+
+      {isAdmin && (
+        <button
+          className="fab"
+          onClick={async () => {
+            try {
+              const [live, archived] = await Promise.all([fetchProjects(), fetchArchivedProjects()]);
+              const ids = [...(live || []), ...(archived || [])].map((p) => p.id);
+              setNextId((Math.max(0, ...ids) || 0) + 1);
+            } catch {
+              setNextId(1);
+            }
+            setShowNewObj(true);
+          }}
+          title={t("app.newObject")}
+        >
+          <Icon name="plus" size={18} />
+          <span>{t("app.newObject")}</span>
+        </button>
+      )}
+
+      {showNewObj && (
+        <NewObjectModal
+          nextId={nextId}
+          busy={creating}
+          onClose={() => setShowNewObj(false)}
+          onSave={async (payload) => {
+            setCreating(true);
+            try {
+              const created = await createProject(payload);
+              setShowNewObj(false);
+              setSavedToast(t("app.objectAdded", { id: created.id, client: created.client || created.name }));
+              setTimeout(() => setSavedToast(null), 2600);
+              setRev((r) => r + 1);
+            } finally {
+              setCreating(false);
+            }
+          }}
+        />
+      )}
 
       {savedToast && (
         <div className="toast">

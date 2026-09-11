@@ -1,14 +1,19 @@
 import { useEffect, useState } from "react";
 import Icon from "./icons";
-import { fetchArchivedProjects } from "./api";
-import { ProjectDetail, STATUS_LABEL, statusClass } from "./projects";
+import PeriodPicker from "./period-picker";
+import { fetchArchivedProjects, purgeProject, restoreProject } from "./api";
+import { OBJECT_STATUS_LABEL, objectStatusClass } from "./object-status";
 import { useI18n } from "./i18n";
 
-const Archive = ({ user }) => {
+const num = (v) => Number(v || 0);
+
+const Archive = ({ user, onSelectObject }) => {
   const { t, dateLocale } = useI18n();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState(null);
+  const [tab, setTab] = useState("completed");
+  const [period, setPeriod] = useState(null);
+  const [err, setErr] = useState("");
 
   const load = async () => setItems(await fetchArchivedProjects());
 
@@ -16,27 +21,53 @@ const Archive = ({ user }) => {
     (async () => {
       try {
         await load();
+      } catch (error) {
+        setErr(error.message);
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  if (selected) {
-    return (
-      <ProjectDetail
-        user={user}
-        projectId={selected}
-        readOnly
-        onBack={() => {
-          setSelected(null);
-          load().catch(() => {});
-        }}
-      />
-    );
-  }
+  const completed = items.filter((p) => (p.archive_reason || p.status) !== "deleted" && p.status !== "deleted");
+  const deleted = items.filter((p) => p.archive_reason === "deleted" || p.status === "deleted");
+  const all = items;
 
-  const totalExpenses = items.reduce((s, p) => s + Number(p.expenses_total || 0), 0);
+  const inPeriod = (p) => {
+    if (!period) return true;
+    const d = (p.closed_at || p.updated_at || "").slice(0, 10);
+    return d && d >= period.from && d <= period.to;
+  };
+
+  const source = tab === "completed" ? completed : tab === "deleted" ? deleted : all;
+  const list = source.filter(inPeriod);
+
+  const spentOf = (p) =>
+    Object.values(p.spent_by_material || {}).reduce((s, v) => s + num(v), 0)
+    + (p.spendings || []).reduce((s, row) => s + num(row.quantity), 0);
+
+  const totalArchivedM2 = all.reduce((s, p) => s + num(p.total_m2), 0);
+  const totalKgUsed = all.reduce((s, p) => s + spentOf(p), 0);
+
+  const restore = async (p) => {
+    try {
+      await restoreProject(p.id);
+      await load();
+    } catch (error) {
+      setErr(error.message);
+    }
+  };
+
+  const purge = async (p) => {
+    const client = p.client || p.name;
+    if (!window.confirm(t("archive.purgeConfirm", { id: p.id, client }))) return;
+    try {
+      await purgeProject(p.id);
+      await load();
+    } catch (error) {
+      setErr(error.message);
+    }
+  };
 
   return (
     <div className="page">
@@ -46,56 +77,115 @@ const Archive = ({ user }) => {
           <h1 className="page-title">{t("archive.title")}</h1>
           <p className="page-sub">{t("archive.sub")}</p>
         </div>
+        <div className="page-actions">
+          <PeriodPicker value={period} onChange={setPeriod} />
+          {period && <button className="btn btn-ghost" onClick={() => setPeriod(null)}>{t("archive.clearPeriod")}</button>}
+        </div>
       </header>
+
+      {err && <div className="login-err">{err}</div>}
 
       <section className="kpis">
         <div className="kpi">
           <div className="kpi-label">{t("archive.closedProjects")}</div>
-          <div className="kpi-value mono">{items.length}</div>
+          <div className="kpi-value mono">{completed.length}</div>
+          <div className="kpi-meta">{t("archive.completedMeta")}</div>
         </div>
         <div className="kpi">
-          <div className="kpi-label">{t("archive.totalExpenses")}</div>
-          <div className="kpi-value mono">{totalExpenses.toFixed(2)}<span className="kpi-unit">€</span></div>
+          <div className="kpi-label">{t("archive.deleted")}</div>
+          <div className="kpi-value mono">{deleted.length}</div>
+          <div className="kpi-meta">{t("archive.deletedMeta")}</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">{t("archive.totalVolume")}</div>
+          <div className="kpi-value mono">{totalArchivedM2}<span className="kpi-unit">m²</span></div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">{t("archive.materialUsed")}</div>
+          <div className="kpi-value mono">{totalKgUsed.toFixed(0)}<span className="kpi-unit">kg</span></div>
         </div>
       </section>
 
-      {loading ? (
-        <section className="card muted">{t("common.loading")}</section>
-      ) : items.length === 0 ? (
-        <section className="card muted">{t("archive.empty")}</section>
-      ) : (
-        <section className="card">
+      <section className="card">
+        <div className="seg" style={{ marginBottom: 16 }}>
+          <button className={`seg-btn ${tab === "completed" ? "on" : ""}`} onClick={() => setTab("completed")}>
+            {t("archive.tabCompleted", { n: completed.length })}
+          </button>
+          <button className={`seg-btn ${tab === "deleted" ? "on" : ""}`} onClick={() => setTab("deleted")}>
+            {t("archive.tabDeleted", { n: deleted.length })}
+          </button>
+          <button className={`seg-btn ${tab === "all" ? "on" : ""}`} onClick={() => setTab("all")}>
+            {t("archive.tabAll", { n: all.length })}
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="muted small">{t("common.loading")}</div>
+        ) : (
           <table className="table">
             <thead>
               <tr>
+                <th></th>
                 <th>{t("archive.project")}</th>
-                <th>{t("common.client")}</th>
-                <th>{t("archive.assignee")}</th>
-                <th>{t("archive.expenses")}</th>
-                <th>{t("archive.closed")}</th>
+                <th>{t("archive.system")}</th>
+                <th>{t("archive.volume")}</th>
+                <th>{t("archive.reason")}</th>
+                <th>{t("archive.date")}</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {items.map((p) => (
-                <tr key={p.id}>
-                  <td>
-                    <div className="dt-name">{p.name}</div>
-                    <span className={`status ${statusClass(p.status)}`}>{t(STATUS_LABEL[p.status])}</span>
-                  </td>
-                  <td>{p.client || t("common.dash")}</td>
-                  <td>{p.assigned_to?.name}</td>
-                  <td className="mono">{p.expenses_total} €</td>
-                  <td className="mono small">{p.closed_at ? new Date(p.closed_at).toLocaleDateString(dateLocale) : t("common.dash")}</td>
-                  <td className="ta-r">
-                    <button className="btn btn-sm btn-outline" onClick={() => setSelected(p.id)}>{t("common.view")}</button>
-                  </td>
+              {list.map((p) => {
+                const deletedRow = p.archive_reason === "deleted" || p.status === "deleted";
+                const reasonKey = deletedRow ? "deleted" : "completed";
+                const archivedAt = (p.closed_at || p.updated_at || "").slice(0, 10);
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <span className="obj-dot" style={{ background: p.color || "#2C5F2E", width: 12, height: 12, display: "inline-block" }} />
+                    </td>
+                    <td>
+                      <strong>#{p.id}</strong> {p.client || p.name}
+                      <div className="muted small">{p.address}</div>
+                    </td>
+                    <td>{p.system || t("common.dash")}</td>
+                    <td className="mono">{num(p.total_m2)} m²</td>
+                    <td>
+                      <span className={objectStatusClass(deletedRow ? "deleted" : "closed")}>
+                        {t(OBJECT_STATUS_LABEL[reasonKey])}
+                      </span>
+                    </td>
+                    <td className="mono small">
+                      {archivedAt ? new Date(archivedAt).toLocaleDateString(dateLocale) : t("common.dash")}
+                    </td>
+                    <td className="ta-r">
+                      {deletedRow ? (
+                        <>
+                          <button className="icon-btn sm" title={t("archive.restore")} onClick={() => restore(p)}>
+                            <Icon name="arrowRight" size={13} />
+                          </button>
+                          <button className="icon-btn sm danger" title={t("archive.purge")} onClick={() => purge(p)}>
+                            <Icon name="trash" size={13} />
+                          </button>
+                        </>
+                      ) : (
+                        <button className="icon-btn sm" title={t("common.view")} onClick={() => onSelectObject && onSelectObject(p.id)}>
+                          <Icon name="edit" size={13} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {list.length === 0 && (
+                <tr>
+                  <td colSpan="7" className="muted small ta-c" style={{ padding: 30 }}>{t("archive.empty")}</td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
-        </section>
-      )}
+        )}
+      </section>
     </div>
   );
 };

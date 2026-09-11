@@ -10,12 +10,12 @@ import {
   fetchMaterials,
   fetchProject,
   fetchProjects,
+  fetchSystems,
   fetchTools,
   fetchUsers,
   setProjectStatus,
 } from "./api";
 import { useI18n } from "./i18n";
-import { PROCOAT_SYSTEMS } from "./systems";
 
 const PALETTE = ["#2C5F2E", "#5B7DB1", "#F4A442", "#A66A8E", "#6E5B8A", "#7A8B5C", "#B85C5C", "#5C8B8B"];
 
@@ -31,6 +31,7 @@ const statusClass = (s) =>
 
 const ProjectForm = ({ users, onClose, onSave }) => {
   const { t } = useI18n();
+  const [systems, setSystems] = useState([]);
   const [form, setForm] = useState({
     name: "",
     client: "",
@@ -46,6 +47,12 @@ const ProjectForm = ({ users, onClose, onSave }) => {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  useEffect(() => {
+    fetchSystems()
+      .then(setSystems)
+      .catch(() => setSystems([]));
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -112,7 +119,7 @@ const ProjectForm = ({ users, onClose, onSave }) => {
               <span className="field-label">{t("newObject.system")}</span>
               <select className="select" value={form.system} onChange={set("system")}>
                 <option value="">{t("common.dash")}</option>
-                {PROCOAT_SYSTEMS.map((s) => (
+                {systems.map((s) => (
                   <option key={s.code} value={s.name}>{s.name}</option>
                 ))}
               </select>

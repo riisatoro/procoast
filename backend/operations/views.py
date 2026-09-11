@@ -9,12 +9,15 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from accounts.permissions import IsAdminType
 
 from .activity import log_activity
 from .models import (
     ActivityLog,
+    CalendarSettings,
+    CoatingSystem,
     DailyReport,
     DailyReportMaterial,
     DailyReportTask,
@@ -33,6 +36,8 @@ from .models import (
 )
 from .serializers import (
     ActivityLogSerializer,
+    CalendarSettingsSerializer,
+    CoatingSystemSerializer,
     DailyReportSerializer,
     ExpenseSerializer,
     JobSerializer,
@@ -58,6 +63,116 @@ def is_admin(user):
             getattr(user, "user_type", None) == "admin" or getattr(user, "is_superuser", False)
         )
     )
+
+
+def is_archived(project):
+    return project.status in Project.ARCHIVED_STATUSES
+
+
+def default_warehouse(user):
+    warehouse = Warehouse.objects.order_by("id").first()
+    if warehouse:
+        return warehouse
+    return Warehouse.objects.create(name="Noliktava", created_by=user)
+
+
+def get_or_create_material(user, name, color="", unit="kg", per_m2=None):
+    name = (name or "").strip()
+    color = (color or "").strip()
+    if color in {"—", "-"}:
+        color = ""
+    if not name:
+        raise ValidationError({"materials": ["Materiāla nosaukums ir obligāts."]})
+    warehouse = default_warehouse(user)
+    material = Material.objects.filter(name__iexact=name, color__iexact=color).first()
+    if material:
+        updates = []
+        if per_m2 is not None and material.per_m2 != per_m2:
+            material.per_m2 = per_m2
+            updates.append("per_m2")
+        if updates:
+            material.save(update_fields=updates + ["updated_at"])
+        return material
+    return Material.objects.create(
+        name=name,
+        color=color,
+        unit=unit or "kg",
+        per_m2=per_m2,
+        warehouse=warehouse,
+        created_by=user,
+    )
+
+
+def apply_project_blueprint(project, user, tasks_payload, materials_payload):
+    if tasks_payload:
+        for index, row in enumerate(tasks_payload):
+            name = str(row.get("name") or "").strip()
+            if not name:
+                continue
+            try:
+                total = Decimal(str(row.get("quantity_total") or row.get("total") or 0))
+            except (ArithmeticError, TypeError, ValueError):
+                total = Decimal("0")
+            if total <= 0 and project.total_m2:
+                total = project.total_m2
+            if total <= 0:
+                continue
+            ProjectTask.objects.create(
+                project=project,
+                name=name,
+                unit=str(row.get("unit") or "m²"),
+                quantity_total=total,
+                sort_order=index,
+            )
+    elif project.total_m2 and project.total_m2 > 0:
+        ProjectTask.objects.create(
+            project=project,
+            name="Virsmas sagatavošana / slīpēšana",
+            unit="m²",
+            quantity_total=project.total_m2,
+            sort_order=0,
+        )
+
+    if not materials_payload:
+        return
+    for row in materials_payload:
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        try:
+            qty = Decimal(str(row.get("quantity_needed") or row.get("needed") or 0))
+        except (ArithmeticError, TypeError, ValueError):
+            qty = Decimal("0")
+        if qty <= 0:
+            continue
+        per_m2 = row.get("per_m2")
+        try:
+            per_m2 = Decimal(str(per_m2)) if per_m2 not in (None, "") else None
+        except (ArithmeticError, TypeError, ValueError):
+            per_m2 = None
+        material = get_or_create_material(
+            user,
+            name,
+            color=str(row.get("color") or ""),
+            unit=str(row.get("unit") or "kg"),
+            per_m2=per_m2,
+        )
+        existing, created = ProjectMaterial.objects.get_or_create(
+            project=project,
+            material=material,
+            defaults={"quantity_needed": qty},
+        )
+        if not created:
+            existing.quantity_needed = existing.quantity_needed + qty
+            existing.save(update_fields=["quantity_needed"])
+
+
+def release_open_tools(project, user):
+    now = timezone.now()
+    released = ProjectTool.objects.filter(project=project, released_at__isnull=True)
+    count = released.count()
+    released.update(released_at=now, released_by=user)
+    return count
 
 
 class WarehouseViewSet(
@@ -208,6 +323,7 @@ class ProjectViewSet(
     mixins.CreateModelMixin,
     mixins.RetrieveModelMixin,
     mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
     queryset = Project.objects.all()
@@ -219,7 +335,7 @@ class ProjectViewSet(
         return ProjectListSerializer
 
     def get_permissions(self):
-        if self.action == "create":
+        if self.action in ("create", "close", "discard", "restore", "destroy"):
             return [IsAuthenticated(), IsAdminType()]
         return [IsAuthenticated()]
 
@@ -240,38 +356,43 @@ class ProjectViewSet(
             "spendings__recorded_by",
             "tasks",
         )
-        user = self.request.user
-        if not is_admin(user):
-            qs = qs.filter(assigned_to=user)
         if self.action == "archive":
-            return qs.filter(status=Project.Status.CLOSED)
+            return qs.filter(status__in=Project.ARCHIVED_STATUSES)
         if self.action == "list":
-            return qs.exclude(status=Project.Status.CLOSED)
+            return qs.exclude(status__in=Project.ARCHIVED_STATUSES)
         return qs
 
     def perform_create(self, serializer):
-        project = serializer.save(created_by=self.request.user, status=Project.Status.OPEN)
-        if project.total_m2 and project.total_m2 > 0 and not project.tasks.exists():
-            ProjectTask.objects.create(
-                project=project,
-                name="Virsmas sagatavošana / slīpēšana",
-                unit="m²",
-                quantity_total=project.total_m2,
-                sort_order=0,
-            )
+        user = self.request.user
+        tasks_payload = serializer.validated_data.pop("tasks", None) or []
+        materials_payload = serializer.validated_data.pop("materials", None) or []
+        name = (serializer.validated_data.get("name") or "").strip()
+        client = (serializer.validated_data.get("client") or "").strip()
+        if not name:
+            serializer.validated_data["name"] = client or "Objekts"
+        assigned = serializer.validated_data.get("assigned_to") or user
+        project = serializer.save(
+            created_by=user,
+            assigned_to=assigned,
+            status=Project.Status.OPEN,
+        )
+        apply_project_blueprint(project, user, tasks_payload, materials_payload)
+        assignee = project.assigned_to.name if project.assigned_to_id else "—"
         log_activity(
-            self.request.user,
+            user,
             "created",
             "project",
             project.id,
-            f"Izveidots projekts «{project.name}», piešķirts {project.assigned_to.name}",
+            f"Izveidots objekts «{project.name}», piešķirts {assignee}",
         )
 
     def perform_update(self, serializer):
-        if serializer.instance.status == Project.Status.CLOSED:
-            raise ValidationError({"detail": "Slēgtu projektu nevar labot."})
+        if is_archived(serializer.instance):
+            raise ValidationError({"detail": "Arhivētu objektu nevar labot."})
         if not self._can_work(serializer.instance):
             raise ValidationError({"detail": "Nav piekļuves šim projektam."})
+        serializer.validated_data.pop("tasks", None)
+        serializer.validated_data.pop("materials", None)
         project = serializer.save()
         log_activity(
             self.request.user,
@@ -283,12 +404,14 @@ class ProjectViewSet(
 
     def _can_work(self, project):
         user = self.request.user
-        return is_admin(user) or project.assigned_to_id == user.id
+        if is_archived(project):
+            return False
+        return bool(user and user.is_authenticated)
 
     def _ensure_open(self, project):
-        if project.status == Project.Status.CLOSED:
+        if is_archived(project):
             return Response(
-                {"detail": "Slēgtu projektu nevar mainīt."},
+                {"detail": "Arhivētu objektu nevar mainīt."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return None
@@ -308,11 +431,7 @@ class ProjectViewSet(
             return blocked
         with transaction.atomic():
             now = timezone.now()
-            released = ProjectTool.objects.filter(
-                project=project, released_at__isnull=True
-            )
-            count = released.count()
-            released.update(released_at=now, released_by=request.user)
+            count = release_open_tools(project, request.user)
             project.status = Project.Status.CLOSED
             project.closed_at = now
             project.closed_by = request.user
@@ -329,6 +448,63 @@ class ProjectViewSet(
         )
         project = self.get_queryset().get(pk=project.pk)
         return Response(ProjectDetailSerializer(project).data)
+
+    @action(detail=True, methods=["post"])
+    def discard(self, request, pk=None):
+        project = self.get_object()
+        if project.status == Project.Status.DELETED:
+            return Response({"detail": "Objekts jau ir dzēsts."}, status=400)
+        with transaction.atomic():
+            now = timezone.now()
+            count = release_open_tools(project, request.user)
+            project.status = Project.Status.DELETED
+            project.closed_at = now
+            project.closed_by = request.user
+            project.save()
+        summary = f"Dzēsts objekts «{project.name}» (arhivēts)"
+        if count:
+            summary += f", atbrīvoti {count} instrumenti"
+        log_activity(request.user, "deleted", "project", project.id, summary)
+        project = self.get_queryset().get(pk=project.pk)
+        return Response(ProjectDetailSerializer(project).data)
+
+    @action(detail=True, methods=["post"])
+    def restore(self, request, pk=None):
+        project = self.get_object()
+        if project.status != Project.Status.DELETED:
+            return Response({"detail": "Atjaunot var tikai dzēstus objektus."}, status=400)
+        project.status = Project.Status.OPEN
+        project.closed_at = None
+        project.closed_by = None
+        project.save(update_fields=["status", "closed_at", "closed_by", "updated_at"])
+        log_activity(
+            request.user,
+            "restored",
+            "project",
+            project.id,
+            f"Atjaunots objekts «{project.name}»",
+        )
+        project = self.get_queryset().get(pk=project.pk)
+        return Response(ProjectDetailSerializer(project).data)
+
+    def destroy(self, request, *args, **kwargs):
+        project = self.get_object()
+        if project.status != Project.Status.DELETED:
+            return Response(
+                {"detail": "Neatgriezeniski dzēst var tikai arhivētus (dzēstus) objektus."},
+                status=400,
+            )
+        name = project.name
+        pk = project.pk
+        project.delete()
+        log_activity(
+            request.user,
+            "purged",
+            "project",
+            pk,
+            f"Neatgriezeniski dzēsts objekts «{name}»",
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["post"], url_path="set-status")
     def set_status(self, request, pk=None):
@@ -688,7 +864,7 @@ class JobViewSet(
         project = serializer.validated_data["project"]
         assigned = serializer.validated_data.get("assigned_to")
         if not is_admin(user):
-            if project.assigned_to_id != user.id:
+            if is_archived(project):
                 raise ValidationError({"project_id": "Nav piekļuves šim projektam."})
             assigned = user
         elif assigned is None:
@@ -709,7 +885,7 @@ class JobViewSet(
         if not is_admin(user) and job.assigned_to_id != user.id and job.created_by_id != user.id:
             raise ValidationError({"detail": "Nav piekļuves šim darbam."})
         project = serializer.validated_data.get("project", job.project)
-        if not is_admin(user) and project.assigned_to_id != user.id:
+        if not is_admin(user) and is_archived(project):
             raise ValidationError({"project_id": "Nav piekļuves šim projektam."})
         if not is_admin(user):
             serializer.save(assigned_to=user)
@@ -816,17 +992,15 @@ class DailyReportViewSet(
         if recorded:
             qs = qs.filter(recorded_by_id=recorded)
         if not is_admin(user):
-            qs = qs.filter(Q(recorded_by=user) | Q(project__assigned_to=user))
+            qs = qs.filter(recorded_by=user)
         return qs
 
     def create(self, request, *args, **kwargs):
         serializer = DailyReportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         project = serializer.validated_data["project"]
-        if not (is_admin(request.user) or project.assigned_to_id == request.user.id):
-            return Response({"detail": "Nav piekļuves šim projektam."}, status=403)
-        if project.status == Project.Status.CLOSED:
-            return Response({"detail": "Slēgtu projektu nevar mainīt."}, status=400)
+        if is_archived(project):
+            return Response({"detail": "Arhivētu objektu nevar mainīt."}, status=400)
         work_date = serializer.validated_data["work_date"]
         notes = serializer.validated_data.get("notes") or ""
         task_payload = request.data.get("task_lines") or []
@@ -989,3 +1163,27 @@ def notif_style(action):
         "deleted": ("danger", "trash"),
     }
     return mapping.get(action, ("default", "bell"))
+
+
+class CoatingSystemViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    queryset = CoatingSystem.objects.prefetch_related("layers")
+    serializer_class = CoatingSystemSerializer
+    permission_classes = [IsAuthenticated]
+
+
+class CalendarSettingsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.request.method in ("PUT", "PATCH"):
+            return [IsAuthenticated(), IsAdminType()]
+        return [IsAuthenticated()]
+
+    def get(self, request):
+        return Response(CalendarSettingsSerializer().to_representation(CalendarSettings.load()))
+
+    def put(self, request):
+        serializer = CalendarSettingsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        settings = serializer.save()
+        return Response(CalendarSettingsSerializer().to_representation(settings))

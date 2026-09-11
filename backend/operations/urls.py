@@ -1,7 +1,10 @@
+from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
     ActivityLogViewSet,
+    CalendarSettingsView,
+    CoatingSystemViewSet,
     DailyReportViewSet,
     JobViewSet,
     MaterialViewSet,
@@ -22,5 +25,9 @@ router.register("jobs", JobViewSet, basename="job")
 router.register("activity", ActivityLogViewSet, basename="activity")
 router.register("reports", DailyReportViewSet, basename="report")
 router.register("notifications", NotificationsViewSet, basename="notification")
+router.register("systems", CoatingSystemViewSet, basename="system")
 
-urlpatterns = router.urls
+urlpatterns = [
+    *router.urls,
+    path("calendar-settings/", CalendarSettingsView.as_view(), name="calendar-settings"),
+]

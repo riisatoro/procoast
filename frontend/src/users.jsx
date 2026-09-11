@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import Icon from "./icons";
 import { createUser, fetchUsers, updateUser } from "./api";
-import { PROCOAT_DATA, setProcoatData } from "./data";
 import { useI18n } from "./i18n";
 
 const emptyForm = {
@@ -127,7 +126,6 @@ const UsersPage = ({ user, onOpenProfile }) => {
   const load = async () => {
     const list = await fetchUsers();
     setUsers(list);
-    setProcoatData({ ...PROCOAT_DATA, users: list });
   };
 
   useEffect(() => {
@@ -137,7 +135,6 @@ const UsersPage = ({ user, onOpenProfile }) => {
         const list = await fetchUsers();
         if (!cancelled) {
           setUsers(list);
-          setProcoatData({ ...PROCOAT_DATA, users: list });
         }
       } catch {
         if (!cancelled) setUsers([]);

@@ -14,6 +14,8 @@ from rest_framework.views import APIView
 from accounts.permissions import IsAdminType
 from operations.models import (
     ActivityLog,
+    DailyReport,
+    DailyReportTask,
     Expense,
     Job,
     Material,
@@ -80,6 +82,23 @@ def _delta_pct(current, previous):
     return int(((current - previous) / previous * 100).quantize(Decimal("1")))
 
 
+def _project_done_m2(project):
+    tasks = list(project.tasks.all())
+    if not tasks:
+        return Decimal("0")
+    pcts = []
+    for task in tasks:
+        total = task.quantity_total or Decimal("0")
+        if total <= 0:
+            continue
+        done = sum((line.quantity for line in task.report_lines.all()), Decimal("0"))
+        pcts.append(min(Decimal("1"), done / total))
+    if not pcts:
+        return Decimal("0")
+    volume = project.total_m2 or Decimal("0")
+    return (sum(pcts) / len(pcts) * volume).quantize(Decimal("0.01")) if volume else Decimal("0")
+
+
 class DashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -111,6 +130,7 @@ class DashboardStatsView(APIView):
         progress_n = status_counts.get(Project.Status.IN_PROGRESS, 0)
         review_n = status_counts.get(Project.Status.IN_REVIEW, 0)
         closed_n = status_counts.get(Project.Status.CLOSED, 0)
+        deleted_n = status_counts.get(Project.Status.DELETED, 0)
         active_n = open_n + progress_n + review_n
 
         expenses_now = _sum_amount(Expense.objects.filter(created_at__range=(start, end)))
@@ -123,7 +143,15 @@ class DashboardStatsView(APIView):
         )
         jobs_now = Job.objects.filter(starts_at__range=(start, end)).count()
         jobs_prev = Job.objects.filter(starts_at__range=(prev_start, prev_end)).count()
-        closed_in_period = Project.objects.filter(closed_at__range=(start, end)).count()
+        closed_in_period = Project.objects.filter(
+            status=Project.Status.CLOSED, closed_at__range=(start, end)
+        ).count()
+        period_m2 = DailyReportTask.objects.filter(
+            report__work_date__range=(start_date, end_date)
+        ).aggregate(total=Coalesce(Sum("quantity"), ZERO))["total"]
+        prev_m2 = DailyReportTask.objects.filter(
+            report__work_date__range=(prev_start.date(), prev_end.date())
+        ).aggregate(total=Coalesce(Sum("quantity"), ZERO))["total"]
 
         tool_stock = Tool.objects.aggregate(total=Coalesce(Sum("stock"), ZERO))["total"]
         tool_borrowed = ProjectTool.objects.filter(released_at__isnull=True).aggregate(
@@ -176,12 +204,22 @@ class DashboardStatsView(APIView):
             Project.Status.IN_PROGRESS: 0,
             Project.Status.IN_REVIEW: 1,
             Project.Status.OPEN: 2,
+            Project.Status.CLOSED: 3,
         }
         projects = []
+        total_m2 = Decimal("0")
+        done_m2 = Decimal("0")
+        ever_m2 = Decimal("0")
         for project in (
-            Project.objects.exclude(status=Project.Status.CLOSED)
+            Project.objects.exclude(status=Project.Status.DELETED)
             .select_related("assigned_to")
-            .prefetch_related("needed_materials", "spendings", "expenses", "borrowed_tools")
+            .prefetch_related(
+                "needed_materials",
+                "spendings",
+                "expenses",
+                "borrowed_tools",
+                "tasks__report_lines",
+            )
         ):
             need_rows = list(project.needed_materials.all())
             spend_rows = list(project.spendings.all())
@@ -194,7 +232,15 @@ class DashboardStatsView(APIView):
                 (row.quantity for row in tool_rows if row.released_at is None),
                 Decimal("0"),
             )
-            pct = int((spent / needed * 100).quantize(Decimal("1"))) if needed else 0
+            volume = project.total_m2 or Decimal("0")
+            finished = _project_done_m2(project)
+            if project.status == Project.Status.CLOSED and volume:
+                finished = volume
+            total_m2 += volume
+            done_m2 += finished
+            ever_m2 += volume
+            mat_pct = int((spent / needed * 100).quantize(Decimal("1"))) if needed else 0
+            progress_pct = int((finished / volume * 100).quantize(Decimal("1"))) if volume else 0
             assignee = project.assigned_to
             projects.append(
                 {
@@ -202,7 +248,12 @@ class DashboardStatsView(APIView):
                     "name": project.name,
                     "client": project.client,
                     "address": project.address,
+                    "system": project.system,
+                    "color": project.color,
                     "status": project.status,
+                    "total_m2": _dec(volume),
+                    "done_m2": _dec(finished),
+                    "progress_pct": min(100, max(0, progress_pct)),
                     "assigned_to": {
                         "id": assignee.id,
                         "name": assignee.name,
@@ -212,12 +263,17 @@ class DashboardStatsView(APIView):
                     else None,
                     "expenses_total": _dec(expenses),
                     "materials_needed": len(need_rows),
-                    "material_pct": min(100, max(0, pct)),
+                    "material_pct": min(100, max(0, mat_pct)),
                     "borrowed_tools": int(borrowed),
                     "updated_at": project.updated_at.isoformat(),
                 }
             )
         projects.sort(key=lambda p: (project_order.get(p["status"], 9), -p["id"]))
+        deleted_m2 = Project.objects.filter(status=Project.Status.DELETED).aggregate(
+            total=Coalesce(Sum("total_m2"), ZERO)
+        )["total"]
+        ever_m2 += deleted_m2 or Decimal("0")
+        avg_progress = int((done_m2 / total_m2 * 100).quantize(Decimal("1"))) if total_m2 else 0
 
         today_jobs = []
         for job in (
@@ -242,6 +298,36 @@ class DashboardStatsView(APIView):
                 }
             )
 
+        today_reports = []
+        for report in (
+            DailyReport.objects.filter(work_date=today)
+            .select_related("project", "recorded_by")
+            .prefetch_related("task_lines__task", "material_lines__material")
+            .order_by("-updated_at")[:12]
+        ):
+            person = report.recorded_by
+            parts = []
+            for line in report.task_lines.all():
+                if line.quantity:
+                    unit = line.task.unit if line.task_id else ""
+                    name = line.task.name if line.task_id else ""
+                    parts.append(f"{line.quantity} {unit} {name}".strip())
+            for line in report.material_lines.all():
+                if line.quantity:
+                    mat = line.material
+                    parts.append(f"{line.quantity} {mat.unit} {mat.name}")
+            today_reports.append(
+                {
+                    "id": report.id,
+                    "object_id": report.project_id,
+                    "client": report.project.client or report.project.name,
+                    "worker": person.initials if person else "",
+                    "worker_name": person.name if person else "",
+                    "summary": ", ".join(parts[:4]),
+                    "created_at": report.created_at.isoformat(),
+                }
+            )
+
         activity = ActivityLog.objects.select_related("user").filter(
             created_at__range=(start, end)
         )[:12]
@@ -259,14 +345,23 @@ class DashboardStatsView(APIView):
                     "jobs_prev": jobs_prev,
                     "jobs_delta": _delta_pct(jobs_now, jobs_prev),
                     "closed": closed_in_period,
+                    "done_m2": _dec(period_m2),
+                    "done_m2_prev": _dec(prev_m2),
+                    "done_m2_delta": _delta_pct(period_m2, prev_m2),
                 },
                 "projects": {
                     "open": open_n,
                     "in_progress": progress_n,
                     "in_review": review_n,
                     "closed": closed_n,
+                    "deleted": deleted_n,
                     "active": active_n,
-                    "total": active_n + closed_n,
+                    "planned": open_n,
+                    "total": active_n + closed_n + deleted_n,
+                    "done_m2": _dec(done_m2),
+                    "total_m2": _dec(total_m2),
+                    "ever_m2": _dec(ever_m2),
+                    "avg_progress": avg_progress,
                     "items": projects,
                 },
                 "inventory": {
@@ -280,6 +375,7 @@ class DashboardStatsView(APIView):
                 },
                 "material_usage": material_usage[:8],
                 "today_jobs": today_jobs,
+                "today_reports": today_reports,
                 "activity": ActivityLogSerializer(activity, many=True).data,
             }
         )

@@ -86,6 +86,12 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .login-form { display: flex; flex-direction: column; gap: 14px; }
 .login-err { color: var(--danger); font-size: 12px; }
 .btn-full { width: 100%; justify-content: center; }
+.login-note { text-align: center; font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.login-foot { margin-top: 24px; padding-top: 16px; border-top: 1px dashed var(--border-strong); }
+.login-demo { font-size: 11px; color: var(--text-soft); text-align: center; margin-bottom: 8px; letter-spacing: 0.08em; }
+.login-demo-list { display: flex; gap: 8px; justify-content: center; }
+.chip { padding: 6px 12px; border-radius: 999px; background: white; border: 1px solid var(--border); font-size: 11px; }
+.chip:hover { border-color: var(--green); color: var(--green); }
 
 /* ---------- FIELDS ---------- */
 .field { display: flex; flex-direction: column; gap: 6px; }

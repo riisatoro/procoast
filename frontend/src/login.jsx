@@ -74,7 +74,20 @@ const Login = ({ onLogin }) => {
           <button type="submit" className="btn btn-primary btn-full" disabled={busy}>
             {busy ? t("login.submitting") : t("login.submit")} <Icon name="arrowRight" size={16} />
           </button>
+          <div className="login-note">{t("login.note")}</div>
         </form>
+
+        <div className="login-foot">
+          <div className="login-demo">{t("login.demo")}</div>
+          <div className="login-demo-list">
+            <button type="button" className="chip" onClick={() => { setIdent("admin"); setPassword("admin"); }}>
+              {t("login.adminChip")}
+            </button>
+            <button type="button" className="chip" onClick={() => { setIdent("kristians"); setPassword("demo"); }}>
+              {t("login.workerChip")}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

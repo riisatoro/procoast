@@ -1,25 +1,52 @@
 import { useEffect, useState } from "react";
 import Icon from "./icons";
-import { PROCOAT_SYSTEMS } from "./systems";
+import { fetchSystems } from "./api";
 import { useI18n } from "./i18n";
 
-// Modal for adding a new object — system picker auto-fills materials
-const NewObjectModal = ({ onClose, onSave, nextId }) => {
+const ymd = (d) => {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+const todayStr = () => ymd(new Date());
+const plusMonths = (n) => {
+  const d = new Date();
+  d.setMonth(d.getMonth() + n);
+  return ymd(d);
+};
+
+const NewObjectModal = ({ onClose, onSave, nextId, busy }) => {
   const { t } = useI18n();
-  const SYSTEMS = PROCOAT_SYSTEMS;
+  const [systems, setSystems] = useState([]);
+  const [systemsErr, setSystemsErr] = useState("");
   const [systemIdx, setSystemIdx] = useState(0);
   const [client, setClient] = useState("");
   const [address, setAddress] = useState("");
   const [totalM2, setTotalM2] = useState(100);
   const [color, setColor] = useState("#2C5F2E");
   const [colorRal, setColorRal] = useState("");
-  const [startDate, setStartDate] = useState("2026-05-12");
-  const [endDate, setEndDate] = useState("2026-06-12");
-  const [overrides, setOverrides] = useState({}); // layerIdx -> { include: bool, perM2 }
+  const [startDate, setStartDate] = useState(todayStr);
+  const [endDate, setEndDate] = useState(() => plusMonths(1));
+  const [overrides, setOverrides] = useState({});
   const [step, setStep] = useState(1);
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const sys = SYSTEMS[systemIdx];
+  const sys = systems[systemIdx];
   const palette = ["#2C5F2E", "#5B7DB1", "#F4A442", "#A66A8E", "#6E5B8A", "#7A8B5C", "#B85C5C", "#5C8B8B", "#1E4220", "#D97757"];
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSystems()
+      .then((rows) => {
+        if (!cancelled) setSystems(rows);
+      })
+      .catch((error) => {
+        if (!cancelled) setSystemsErr(error.message || t("api.loadSystems"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
 
   // reset overrides when system changes
   useEffect(() => { setOverrides({}); }, [systemIdx]);
@@ -28,7 +55,7 @@ const NewObjectModal = ({ onClose, onSave, nextId }) => {
   const layerPerM2 = (i, layer) => overrides[i]?.perM2 ?? layer.perM2;
   const setLayer = (i, patch) => setOverrides({ ...overrides, [i]: { ...overrides[i], ...patch } });
 
-  const previewMaterials = sys.layers.map((l, i) => ({
+  const previewMaterials = (sys?.layers || []).map((l, i) => ({
     layer: l,
     enabled: layerEnabled(i, l),
     perM2: layerPerM2(i, l),
@@ -40,44 +67,55 @@ const NewObjectModal = ({ onClose, onSave, nextId }) => {
 
   const valid = client.trim() && address.trim() && totalM2 > 0 && layerCount > 0;
 
-  const save = () => {
-    if (!valid) return;
-    // Build materials list — collapse same name + color into single line
+  const save = async () => {
+    if (!sys || !valid || saving || busy) return;
     const grouped = {};
     previewMaterials.filter(m => m.enabled).forEach(m => {
       const key = m.layer.name + (sys.needsColor && m.layer.name.toLowerCase().includes("color") ? "|" + colorRal : "");
       if (!grouped[key]) {
         grouped[key] = {
           name: m.layer.name,
-          color: m.layer.name.toLowerCase().includes("color") && colorRal ? colorRal : (m.layer.name.toLowerCase().includes("smilts") || m.layer.name.toLowerCase().includes("pārslas") ? "—" : "—"),
-          needed: 0, taken: 0, perM2: m.perM2,
+          color: m.layer.name.toLowerCase().includes("color") && colorRal ? colorRal : "",
+          needed: 0, perM2: m.perM2,
         };
       }
       grouped[key].needed += m.needed;
     });
 
     const tasks = [
-      { name: t("newObject.taskPrep"), unit: "m²", done: 0, total: totalM2 },
-      ...previewMaterials.filter(m => m.enabled).map((m, i) => ({
+      { name: t("newObject.taskPrep"), unit: "m²", quantity_total: totalM2 },
+      ...previewMaterials.filter(m => m.enabled).map((m) => ({
         name: `${m.layer.name} ${m.layer.role || ""}`.trim(),
-        unit: "m²", done: 0, total: totalM2,
+        unit: "m²",
+        quantity_total: totalM2,
       })),
     ];
 
-    const newObj = {
-      id: nextId,
-      client: client.trim(),
-      address: address.trim(),
-      system: sys.name,
-      totalM2,
-      doneM2: 0,
-      status: "planned",
-      color,
-      startDate, endDate,
-      tasks,
-      materials: Object.values(grouped),
-    };
-    onSave(newObj);
+    setSaving(true);
+    setErr("");
+    try {
+      await onSave({
+        name: client.trim(),
+        client: client.trim(),
+        address: address.trim(),
+        system: sys.name,
+        color,
+        total_m2: totalM2,
+        start_date: startDate || null,
+        end_date: endDate || null,
+        tasks,
+        materials: Object.values(grouped).map((m) => ({
+          name: m.name,
+          color: m.color,
+          per_m2: m.perM2,
+          quantity_needed: m.needed,
+          unit: "kg",
+        })),
+      });
+    } catch (error) {
+      setErr(error.message || t("api.createProject"));
+      setSaving(false);
+    }
   };
 
   return (
@@ -104,6 +142,7 @@ const NewObjectModal = ({ onClose, onSave, nextId }) => {
         <div className="modal-body">
           {step === 1 && (
             <>
+              {systemsErr && <div className="login-err">{systemsErr}</div>}
               <div className="field-row two">
                 <label className="field">
                   <span className="field-label">{t("common.client")}</span>
@@ -118,7 +157,7 @@ const NewObjectModal = ({ onClose, onSave, nextId }) => {
               <label className="field">
                 <span className="field-label">{t("newObject.system")}</span>
                 <div className="sys-grid">
-                  {SYSTEMS.map((s, i) => (
+                  {systems.map((s, i) => (
                     <button key={s.code} type="button"
                       className={`sys-card ${systemIdx === i ? "on" : ""}`}
                       onClick={() => setSystemIdx(i)}>
@@ -154,7 +193,7 @@ const NewObjectModal = ({ onClose, onSave, nextId }) => {
                     ))}
                   </div>
                 </div>
-                {sys.needsColor && (
+                {sys?.needsColor && (
                   <label className="field">
                     <span className="field-label">{t("newObject.ral")}</span>
                     <input className="input" placeholder="RAL7001, RAL7035..." value={colorRal} onChange={e => setColorRal(e.target.value)} />
@@ -169,7 +208,7 @@ const NewObjectModal = ({ onClose, onSave, nextId }) => {
             </>
           )}
 
-          {step === 2 && (
+          {step === 2 && sys && (
             <>
               <div className="layer-head">
                 <div>
@@ -228,25 +267,26 @@ const NewObjectModal = ({ onClose, onSave, nextId }) => {
               </div>
             </>
           )}
+          {err && <div className="login-err">{err}</div>}
         </div>
 
         <footer className="modal-foot">
           <div className="foot-summary">
             <span className="foot-color" style={{ background: color }} />
             <span className="mono small muted">#{nextId}</span>
-            <span className="small"><strong>{client || t("newObject.clientPlaceholder")}</strong> · {sys.name} · <span className="mono">{totalM2} m²</span></span>
+            <span className="small"><strong>{client || t("newObject.clientPlaceholder")}</strong> · {sys?.name || t("common.dash")} · <span className="mono">{totalM2} m²</span></span>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
             <button className="btn btn-ghost" onClick={onClose}>{t("common.cancel")}</button>
             {step === 1 ? (
-              <button className="btn btn-primary" onClick={() => setStep(2)} disabled={!client || !address}>
+              <button className="btn btn-primary" onClick={() => setStep(2)} disabled={!client || !address || !sys}>
                 {t("newObject.next")} <Icon name="arrowRight" size={14} />
               </button>
             ) : (
               <>
                 <button className="btn btn-outline" onClick={() => setStep(1)}>{t("newObject.back")}</button>
-                <button className="btn btn-primary" disabled={!valid} onClick={save}>
-                  <Icon name="save" size={15} /> {t("newObject.register")}
+                <button className="btn btn-primary" disabled={!valid || saving || busy} onClick={save}>
+                  <Icon name="save" size={15} /> {saving || busy ? t("common.saving") : t("newObject.register")}
                 </button>
               </>
             )}

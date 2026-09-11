@@ -4,14 +4,15 @@ import CalendarSettingsModal from "./calendar-settings";
 import SearchableSelect from "./search-select";
 import {
   addDays,
+  DEFAULT_CAL_SETTINGS,
   holidayName,
   isOffDay,
-  loadCalSettings,
   nextWorkday,
-  saveCalSettings,
+  settingsFromApi,
+  settingsToApi,
   ymd,
 } from "./cal-settings";
-import { createJob, fetchJobs, fetchProjects, fetchUsers } from "./api";
+import { createJob, fetchCalendarSettings, fetchJobs, fetchProjects, fetchUsers, saveCalendarSettings } from "./api";
 import { useI18n } from "./i18n";
 
 const PALETTE = ["#2C5F2E", "#5B7DB1", "#F4A442", "#A66A8E", "#6E5B8A", "#7A8B5C", "#B85C5C", "#5C8B8B"];
@@ -59,10 +60,10 @@ const buildMonthGrid = (year, month, firstDay) => {
 
 const rangesOverlap = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
 
-const CalendarView = ({ user }) => {
+const CalendarView = ({ user, onSelectObject }) => {
   const { t, dateLocale } = useI18n();
   const isAdmin = user.role === "ADMINISTRATORS";
-  const [settings, setSettings] = useState(loadCalSettings);
+  const [settings, setSettings] = useState(DEFAULT_CAL_SETTINGS);
   const [cursor, setCursor] = useState(() => {
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
@@ -90,14 +91,16 @@ const CalendarView = ({ user }) => {
   }, [t, settings.firstDay]);
 
   const load = async () => {
-    const [jobRows, projectRows, people] = await Promise.all([
+    const [jobRows, projectRows, people, cal] = await Promise.all([
       fetchJobs(),
       fetchProjects(),
       fetchUsers().catch(() => []),
+      fetchCalendarSettings().catch(() => null),
     ]);
     setJobs(jobRows);
     setProjects(projectRows);
     setUsers((Array.isArray(people) ? people : []).filter((u) => u.is_active !== false));
+    if (cal) setSettings(settingsFromApi(cal));
   };
 
   useEffect(() => {
@@ -181,12 +184,16 @@ const CalendarView = ({ user }) => {
           <p className="page-sub">{t("calendar.sub")}</p>
         </div>
         <div className="page-actions">
-          <button className="btn btn-ghost" onClick={() => setShowSettings(true)}>
-            <Icon name="settings" size={15} /> {t("calendar.settings")}
-          </button>
-          <button className="btn btn-primary" onClick={() => openAdd(null)}>
-            <Icon name="plus" size={15} /> {t("calendar.newEntry")}
-          </button>
+          {isAdmin && (
+            <button className="btn btn-ghost" onClick={() => setShowSettings(true)}>
+              <Icon name="settings" size={15} /> {t("calendar.settings")}
+            </button>
+          )}
+          {isAdmin && (
+            <button className="btn btn-primary" onClick={() => openAdd(null)}>
+              <Icon name="plus" size={15} /> {t("calendar.newEntry")}
+            </button>
+          )}
         </div>
       </header>
 
@@ -273,7 +280,7 @@ const CalendarView = ({ user }) => {
                       {t("calendar.holiday")}
                     </span>
                   )}
-                  {inMonth && (
+                  {inMonth && isAdmin && (
                     <button className="cal-add" onClick={() => openAdd(ds)}>
                       <Icon name="plus" size={11} />
                     </button>
@@ -281,7 +288,13 @@ const CalendarView = ({ user }) => {
                 </div>
                 <div className="cal-events">
                   {display.map((job) => (
-                    <div key={job.id} className="cal-event" style={{ background: jobColor(job, settings.colorBy) }}>
+                    <button
+                      key={job.id}
+                      type="button"
+                      className="cal-event"
+                      style={{ background: jobColor(job, settings.colorBy), width: "100%", textAlign: "left", border: 0, cursor: job.project?.id ? "pointer" : "default" }}
+                      onClick={() => job.project?.id && onSelectObject && onSelectObject(job.project.id)}
+                    >
                       <span className="cal-event-workers mono">
                         {job.ends_at
                           ? `${formatTime(job.starts_at, dateLocale)}–${formatTime(job.ends_at, dateLocale)}`
@@ -290,7 +303,7 @@ const CalendarView = ({ user }) => {
                       </span>
                       <span className="cal-event-title">{job.project?.name}</span>
                       <span className="cal-event-sys">{job.project?.system || job.project?.client || job.project?.address}</span>
-                    </div>
+                    </button>
                   ))}
                   {more > 0 && <div className="cal-more">{t("calendar.more", { n: more })}</div>}
                 </div>
@@ -326,10 +339,15 @@ const CalendarView = ({ user }) => {
         <CalendarSettingsModal
           initial={settings}
           onClose={() => setShowSettings(false)}
-          onSave={(next) => {
-            setSettings(saveCalSettings(next));
-            setShowSettings(false);
-            showToast(t("calSettings.saved"));
+          onSave={async (next) => {
+            try {
+              const saved = await saveCalendarSettings(settingsToApi(next));
+              setSettings(settingsFromApi(saved));
+              setShowSettings(false);
+              showToast(t("calSettings.saved"));
+            } catch (error) {
+              showToast(error.message || t("api.saveCalendarSettings"));
+            }
           }}
         />
       )}

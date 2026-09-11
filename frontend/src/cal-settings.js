@@ -1,17 +1,7 @@
-const KEY = "procoast-cal-settings";
-
 export const WEEKDAY_KEYS = ["P", "O", "T", "C", "Pk", "S", "Sv"];
 
-export const DEFAULT_HOLIDAYS = [
-  { date: "2026-05-01", name: "Darba svētki" },
-  { date: "2026-05-04", name: "Latvijas Republikas Neatkarības atjaunošanas diena" },
-  { date: "2026-06-23", name: "Līgo diena" },
-  { date: "2026-06-24", name: "Jāņu diena" },
-  { date: "2026-11-18", name: "Latvijas Republikas proklamēšanas diena" },
-];
-
 export const DEFAULT_CAL_SETTINGS = {
-  holidays: DEFAULT_HOLIDAYS,
+  holidays: [],
   weekend: ["S", "Sv"],
   workStart: "08:00",
   workEnd: "17:00",
@@ -25,35 +15,41 @@ export const DEFAULT_CAL_SETTINGS = {
   showInitials: true,
 };
 
-function clone(settings) {
+export function settingsFromApi(data) {
   return {
     ...DEFAULT_CAL_SETTINGS,
-    ...settings,
-    holidays: Array.isArray(settings?.holidays)
-      ? settings.holidays.map((h) => ({ date: h.date, name: h.name }))
-      : DEFAULT_HOLIDAYS.map((h) => ({ ...h })),
-    weekend: Array.isArray(settings?.weekend) ? [...settings.weekend] : [...DEFAULT_CAL_SETTINGS.weekend],
+    holidays: Array.isArray(data?.holidays)
+      ? data.holidays.map((h) => ({ date: h.date, name: h.name }))
+      : [],
+    weekend: Array.isArray(data?.weekend) ? [...data.weekend] : [...DEFAULT_CAL_SETTINGS.weekend],
+    workStart: data?.work_start || DEFAULT_CAL_SETTINGS.workStart,
+    workEnd: data?.work_end || DEFAULT_CAL_SETTINGS.workEnd,
+    breakMin: data?.break_min ?? DEFAULT_CAL_SETTINGS.breakMin,
+    autoShift: data?.auto_shift ?? DEFAULT_CAL_SETTINGS.autoShift,
+    warnHoliday: data?.warn_holiday ?? DEFAULT_CAL_SETTINGS.warnHoliday,
+    allowOverlap: data?.allow_overlap ?? DEFAULT_CAL_SETTINGS.allowOverlap,
+    confirmDelete: data?.confirm_delete ?? DEFAULT_CAL_SETTINGS.confirmDelete,
+    firstDay: data?.first_day || DEFAULT_CAL_SETTINGS.firstDay,
+    colorBy: data?.color_by || DEFAULT_CAL_SETTINGS.colorBy,
+    showInitials: data?.show_initials !== false,
   };
 }
 
-export function loadCalSettings() {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return clone(DEFAULT_CAL_SETTINGS);
-    return clone({ ...DEFAULT_CAL_SETTINGS, ...JSON.parse(raw) });
-  } catch {
-    return clone(DEFAULT_CAL_SETTINGS);
-  }
-}
-
-export function saveCalSettings(settings) {
-  const next = clone(settings);
-  try {
-    localStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    /* ignore */
-  }
-  return next;
+export function settingsToApi(settings) {
+  return {
+    holidays: (settings.holidays || []).map((h) => ({ date: h.date, name: h.name })),
+    weekend: settings.weekend,
+    work_start: settings.workStart,
+    work_end: settings.workEnd,
+    break_min: settings.breakMin,
+    auto_shift: settings.autoShift,
+    warn_holiday: settings.warnHoliday,
+    allow_overlap: settings.allowOverlap,
+    confirm_delete: settings.confirmDelete,
+    first_day: settings.firstDay,
+    color_by: settings.colorBy,
+    show_initials: settings.showInitials,
+  };
 }
 
 export function ymd(d) {

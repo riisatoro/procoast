@@ -5,6 +5,10 @@ from decimal import Decimal
 
 from .models import (
     ActivityLog,
+    CalendarHoliday,
+    CalendarSettings,
+    CoatingSystem,
+    CoatingSystemLayer,
     DailyReport,
     DailyReportMaterial,
     DailyReportTask,
@@ -221,9 +225,16 @@ class MaterialSpendingSerializer(serializers.ModelSerializer):
 class ProjectListSerializer(serializers.ModelSerializer):
     assigned_to = UserBriefSerializer(read_only=True)
     assigned_to_id = serializers.PrimaryKeyRelatedField(
-        source="assigned_to", queryset=User.objects.all(), write_only=True
+        source="assigned_to",
+        queryset=User.objects.all(),
+        write_only=True,
+        required=False,
+        allow_null=True,
     )
     created_by = UserBriefSerializer(read_only=True)
+    archive_reason = serializers.SerializerMethodField()
+    tasks = serializers.ListField(child=serializers.DictField(), write_only=True, required=False)
+    materials = serializers.ListField(child=serializers.DictField(), write_only=True, required=False)
 
     class Meta:
         model = Project
@@ -241,17 +252,23 @@ class ProjectListSerializer(serializers.ModelSerializer):
             "assigned_to",
             "assigned_to_id",
             "status",
+            "archive_reason",
             "created_by",
             "created_at",
             "updated_at",
             "closed_at",
+            "tasks",
+            "materials",
         )
-        read_only_fields = ("status", "closed_at", "created_at", "updated_at")
+        read_only_fields = ("status", "closed_at", "created_at", "updated_at", "archive_reason")
+        extra_kwargs = {"name": {"required": False, "allow_blank": True}}
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if self.instance is not None:
-            self.fields["assigned_to_id"].required = False
+    def get_archive_reason(self, obj):
+        if obj.status == Project.Status.DELETED:
+            return "deleted"
+        if obj.status == Project.Status.CLOSED:
+            return "completed"
+        return None
 
 
 class ProjectTaskSerializer(serializers.ModelSerializer):
@@ -407,7 +424,7 @@ class JobSerializer(serializers.ModelSerializer):
     project = ProjectBriefSerializer(read_only=True)
     project_id = serializers.PrimaryKeyRelatedField(
         source="project",
-        queryset=Project.objects.exclude(status=Project.Status.CLOSED),
+        queryset=Project.objects.exclude(status__in=Project.ARCHIVED_STATUSES),
     )
     assigned_to = UserBriefSerializer(read_only=True)
     assigned_to_id = serializers.PrimaryKeyRelatedField(
@@ -437,9 +454,9 @@ class JobSerializer(serializers.ModelSerializer):
         project = attrs.get("project") or getattr(self.instance, "project", None)
         starts_at = attrs.get("starts_at", getattr(self.instance, "starts_at", None))
         ends_at = attrs.get("ends_at", getattr(self.instance, "ends_at", None))
-        if project and project.status == Project.Status.CLOSED:
+        if project and project.status in Project.ARCHIVED_STATUSES:
             raise serializers.ValidationError(
-                {"project_id": "Nevar pievienot darbu slēgtam projektam."}
+                {"project_id": "Nevar pievienot darbu arhivētam objektam."}
             )
         if starts_at and ends_at and ends_at < starts_at:
             raise serializers.ValidationError(
@@ -462,3 +479,75 @@ class ActivityLogSerializer(serializers.ModelSerializer):
             "summary",
             "created_at",
         )
+
+
+class CoatingSystemLayerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CoatingSystemLayer
+        fields = ("id", "name", "per_m2", "role", "optional", "note", "sort_order")
+
+
+class CoatingSystemSerializer(serializers.ModelSerializer):
+    layers = CoatingSystemLayerSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = CoatingSystem
+        fields = ("id", "code", "name", "needs_color", "sort_order", "layers")
+
+
+class CalendarHolidaySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CalendarHoliday
+        fields = ("date", "name")
+        extra_kwargs = {"date": {"validators": []}}
+
+
+class CalendarSettingsSerializer(serializers.Serializer):
+    weekend = serializers.ListField(child=serializers.CharField(), required=False)
+    work_start = serializers.CharField(required=False)
+    work_end = serializers.CharField(required=False)
+    break_min = serializers.IntegerField(required=False)
+    auto_shift = serializers.BooleanField(required=False)
+    warn_holiday = serializers.BooleanField(required=False)
+    allow_overlap = serializers.BooleanField(required=False)
+    confirm_delete = serializers.BooleanField(required=False)
+    first_day = serializers.CharField(required=False)
+    color_by = serializers.CharField(required=False)
+    show_initials = serializers.BooleanField(required=False)
+    holidays = CalendarHolidaySerializer(many=True, required=False)
+
+    def to_representation(self, instance):
+        holidays = CalendarHoliday.objects.all()
+        return {
+            "weekend": instance.weekend or ["S", "Sv"],
+            "work_start": instance.work_start,
+            "work_end": instance.work_end,
+            "break_min": instance.break_min,
+            "auto_shift": instance.auto_shift,
+            "warn_holiday": instance.warn_holiday,
+            "allow_overlap": instance.allow_overlap,
+            "confirm_delete": instance.confirm_delete,
+            "first_day": instance.first_day,
+            "color_by": instance.color_by,
+            "show_initials": instance.show_initials,
+            "holidays": CalendarHolidaySerializer(holidays, many=True).data,
+        }
+
+    def save(self, **kwargs):
+        settings = CalendarSettings.load()
+        data = dict(self.validated_data)
+        holidays = data.pop("holidays", None)
+        for key, value in data.items():
+            setattr(settings, key, value)
+        settings.save()
+        if holidays is not None:
+            keep_dates = []
+            for row in holidays:
+                day = row.get("date")
+                name = (row.get("name") or "").strip()
+                if not day or not name:
+                    continue
+                CalendarHoliday.objects.update_or_create(date=day, defaults={"name": name})
+                keep_dates.append(day)
+            CalendarHoliday.objects.exclude(date__in=keep_dates).delete()
+        return settings

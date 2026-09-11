@@ -7,12 +7,10 @@ const Sidebar = ({ user, currentSection, onNavigate, onLogout, mobileOpen, onClo
   const isAdmin = user.role === "ADMINISTRATORS";
   const items = [
     { id: "dashboard", label: t("nav.dashboard"), icon: "chart", adminOnly: true },
-    { id: "projects", label: t("nav.projects"), icon: "clipboard" },
     { id: "calendar", label: t("nav.calendar"), icon: "calendar" },
-    { id: "warehouses", label: t("nav.warehouses"), icon: "folder" },
-    { id: "materials", label: t("nav.materials"), icon: "package" },
     { id: "tools", label: t("nav.tools"), icon: "wrench" },
-    { id: "archive", label: t("nav.archive"), icon: "archive" },
+    { id: "materials", label: t("nav.materials"), icon: "package" },
+    { id: "archive", label: t("nav.archive"), icon: "archive", adminOnly: true },
     { id: "users", label: t("nav.users"), icon: "users", adminOnly: true },
   ];
   const visible = items.filter(i => !i.adminOnly || isAdmin);

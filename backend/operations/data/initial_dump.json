@@ -1,0 +1,368 @@
+{
+  "users": [
+    {"username": "arturs", "email": "arturs@procoat.lv", "name": "Artūrs Kovaļenko", "initials": "AK", "user_type": "admin", "password": "demo"},
+    {"username": "kristians", "email": "kristians@procoat.lv", "name": "Kristiāns Fjodorovs", "initials": "KF", "user_type": "worker", "password": "demo"},
+    {"username": "denis", "email": "denis@procoat.lv", "name": "Denis Bērziņš", "initials": "DB", "user_type": "worker", "password": "demo"},
+    {"username": "igors", "email": "igors@procoat.lv", "name": "Igors Bērziņš", "initials": "IG", "user_type": "worker", "password": "demo"},
+    {"username": "maris", "email": "maris@procoat.lv", "name": "Māris Vītols", "initials": "MV", "user_type": "worker", "password": "demo"},
+    {"username": "janis", "email": "janis@procoat.lv", "name": "Jānis Roze", "initials": "JR", "user_type": "worker", "password": "demo"}
+  ],
+  "warehouse": {"name": "Noliktava", "location": "Rīga"},
+  "tool_types": [
+    {"name": "Ieklāšanas instrumenti", "icon": "package"},
+    {"name": "Virsmas sagatavošanas instrumenti", "icon": "settings"},
+    {"name": "Papildus aprīkojums", "icon": "shield"}
+  ],
+  "tools": [
+    {"name": "Rullīši 10cm", "type": "Ieklāšanas instrumenti", "recommended": "2/dienā", "stock": 20},
+    {"name": "Rullīši 25cm", "type": "Ieklāšanas instrumenti", "recommended": "2/dienā", "stock": 16},
+    {"name": "Lielais rullis", "type": "Ieklāšanas instrumenti", "recommended": "1/dienā", "stock": 8},
+    {"name": "Otiņas", "type": "Ieklāšanas instrumenti", "recommended": "3/dienā", "stock": 40},
+    {"name": "Lāpstiņa gumijas", "type": "Ieklāšanas instrumenti", "stock": 12},
+    {"name": "Lielā lāpstiņa", "type": "Ieklāšanas instrumenti", "stock": 6},
+    {"name": "Miksera galva", "type": "Ieklāšanas instrumenti", "stock": 4},
+    {"name": "Kāts", "type": "Ieklāšanas instrumenti", "stock": 10},
+    {"name": "Putekļu sūcējs", "type": "Virsmas sagatavošanas instrumenti", "recommended": "1+", "stock": 3},
+    {"name": "Slīpmašīna mazā", "type": "Virsmas sagatavošanas instrumenti", "stock": 2},
+    {"name": "Slīpmašīna lielā", "type": "Virsmas sagatavošanas instrumenti", "stock": 2},
+    {"name": "Citi instrumenti", "type": "Virsmas sagatavošanas instrumenti", "stock": 10},
+    {"name": "Cimdi", "type": "Papildus aprīkojums", "stock": 50},
+    {"name": "Skoča līmlentas", "type": "Papildus aprīkojums", "stock": 30},
+    {"name": "Miskastes maisi", "type": "Papildus aprīkojums", "stock": 40},
+    {"name": "Putekļu sūcēja maisi", "type": "Papildus aprīkojums", "stock": 20}
+  ],
+  "materials": [
+    {"name": "EP02 Color", "color": "RAL7001", "unit": "kg", "per_m2": 0.5, "stock": 250},
+    {"name": "EP02", "color": "RAL7035", "unit": "kg", "per_m2": 1.0, "stock": 400},
+    {"name": "EP02", "color": "", "unit": "kg", "per_m2": 0.5, "stock": 500},
+    {"name": "EP11", "color": "", "unit": "kg", "per_m2": 1.0, "stock": 600},
+    {"name": "EP12", "color": "", "unit": "kg", "per_m2": 1.0, "stock": 200},
+    {"name": "EP13", "color": "", "unit": "kg", "per_m2": 0.5, "stock": 150},
+    {"name": "EP22", "color": "", "unit": "kg", "per_m2": 0.5, "stock": 220},
+    {"name": "EP21", "color": "", "unit": "kg", "per_m2": 0.6, "stock": 120},
+    {"name": "EP42", "color": "", "unit": "kg", "per_m2": 0.5, "stock": 100},
+    {"name": "EP01", "color": "", "unit": "kg", "per_m2": 1.0, "stock": 900},
+    {"name": "Akrila Pārslas", "color": "Mix", "unit": "kg", "per_m2": 0.7, "stock": 180},
+    {"name": "Akrila pārslas", "color": "", "unit": "kg", "per_m2": 0.2, "stock": 80},
+    {"name": "Kvarca smilts", "color": "0.3-0.8mm", "unit": "kg", "per_m2": 2.5, "stock": 800},
+    {"name": "Kvarca smilts", "color": "0.8-1.2mm", "unit": "kg", "per_m2": 2.0, "stock": 300},
+    {"name": "Kvarca smilts", "color": "0.1-0.3mm", "unit": "kg", "per_m2": 2.0, "stock": 1700},
+    {"name": "Krāsota kvarca smilts 0.8-1.2mm", "color": "", "unit": "kg", "per_m2": 5.0, "stock": 200},
+    {"name": "PU-Satin", "color": "", "unit": "kg", "per_m2": 0.3, "stock": 80},
+    {"name": "PU23 (matētais)", "color": "", "unit": "kg", "per_m2": 0.1, "stock": 60},
+    {"name": "PU11", "color": "", "unit": "kg", "per_m2": 2.5, "stock": 200}
+  ],
+  "systems": [
+    {
+      "code": "IZL",
+      "name": "Izlīdzinošā epoksīda sistēma",
+      "needs_color": true,
+      "layers": [
+        {"name": "EP02 vai EP02 Color", "per_m2": 0.5, "role": "Grunts"},
+        {"name": "EP02 vai EP02 Color", "per_m2": 0.5, "role": "2. kārta"},
+        {"name": "EP02 (ja estrich)", "per_m2": 0.5, "optional": true, "note": "Ja estrich"},
+        {"name": "EP11", "per_m2": 2.5, "role": "Izlīdzinošais slānis"},
+        {"name": "PU23 (matētais)", "per_m2": 0.1, "role": "Finišs", "note": "Liek 2 kārtās pēc nepieciešamības"}
+      ]
+    },
+    {
+      "code": "NES",
+      "name": "Neslīdošā epoksīda sistēma",
+      "needs_color": true,
+      "layers": [
+        {"name": "EP02", "per_m2": 0.5, "role": "Grunts", "note": "Šis 2x ja lielas noslodzes grīda"},
+        {"name": "Kvarca smilts 0.3-0.8mm", "per_m2": 2.0, "role": "Apbēršana"},
+        {"name": "EP11", "per_m2": 0.6, "role": "Pārklājums"}
+      ]
+    },
+    {
+      "code": "GLU",
+      "name": "Gludā epoksīda sistēma",
+      "needs_color": true,
+      "layers": [
+        {"name": "EP02 vai EP02 Color", "per_m2": 0.5, "role": "Grunts", "note": "Šis 2x ja lielas noslodzes grīda"},
+        {"name": "EP11", "per_m2": 0.6, "role": "Pārklājums"}
+      ]
+    },
+    {
+      "code": "STR",
+      "name": "Strukturālā epoksīda sistēma",
+      "needs_color": true,
+      "layers": [
+        {"name": "EP02 vai EP02 Color", "per_m2": 0.5, "role": "Grunts", "note": "Šis 2x ja lielas noslodzes grīda"},
+        {"name": "EP12", "per_m2": 0.6, "role": "Pārklājums"}
+      ]
+    },
+    {
+      "code": "ELP",
+      "name": "Elpojošs epoksīda pārklājums",
+      "needs_color": false,
+      "layers": [
+        {"name": "EP13", "per_m2": 0.5, "role": "1. kārta"},
+        {"name": "EP13", "per_m2": 0.5, "role": "2. kārta"}
+      ]
+    },
+    {
+      "code": "KIM",
+      "name": "Ķīmiski noturīga epoksīda sistēma",
+      "needs_color": false,
+      "layers": [
+        {"name": "EP02", "per_m2": 0.5, "role": "Grunts"},
+        {"name": "EP42", "per_m2": 0.5, "role": "1. kārta"},
+        {"name": "EP42", "per_m2": 0.5, "role": "2. kārta"}
+      ]
+    },
+    {
+      "code": "PIP",
+      "name": "Pašizlīdzinoša pārslu epoksīda sistēma",
+      "needs_color": true,
+      "layers": [
+        {"name": "EP02", "per_m2": 0.5, "role": "Grunts"},
+        {"name": "EP02", "per_m2": 0.5, "role": "2. kārta"},
+        {"name": "EP02 (ja estrich)", "per_m2": 0.5, "optional": true, "note": "Ja estrich"},
+        {"name": "EP11", "per_m2": 2.5, "role": "Izlīdzinošais slānis"},
+        {"name": "Akrila pārslas", "per_m2": 0.2, "role": "Pārslas"},
+        {"name": "EP21 vai EP22", "per_m2": 0.8, "role": "Caurspīdīgs slānis", "optional": true, "note": "Ja gribas papildus caurspīdīgu slāni"},
+        {"name": "PU23 (matētais)", "per_m2": 0.1, "role": "Finišs", "note": "Liek 2 kārtās, ja gribas matētu"}
+      ]
+    },
+    {
+      "code": "PAR",
+      "name": "Pārslu epoksīda sistēma (pilnībā apbērta)",
+      "needs_color": true,
+      "layers": [
+        {"name": "EP02 Color", "per_m2": 0.5, "role": "Grunts"},
+        {"name": "EP11", "per_m2": 0.5, "role": "Pārklājums", "optional": true, "note": "Neliek, ja klientam nav nauda un nav liela slodzes telpa"},
+        {"name": "Akrila pārslas", "per_m2": 0.7, "role": "Pilna apbēršana"},
+        {"name": "EP21 vai EP22", "per_m2": 0.6, "role": "Caurspīdīgs slānis"}
+      ]
+    },
+    {
+      "code": "NKS",
+      "name": "Neslīdošā epoksīda sistēma ar krāsainu smilti",
+      "needs_color": true,
+      "layers": [
+        {"name": "EP02", "per_m2": 0.8, "role": "Grunts"},
+        {"name": "Krāsota kvarca smilts 0.8-1.2mm", "per_m2": 5.0, "role": "Apbēršana"},
+        {"name": "EP22", "per_m2": 0.8, "role": "Pārklājums"}
+      ]
+    },
+    {
+      "code": "PIPU",
+      "name": "Pašizlīdzinoša poliuretāna grīdas sistēma",
+      "needs_color": true,
+      "layers": [
+        {"name": "EP02 vai EP02 Color", "per_m2": 0.5, "role": "Grunts"},
+        {"name": "EP02 vai EP02 Color", "per_m2": 0.5, "role": "2. kārta"},
+        {"name": "EP02 (ja estrich)", "per_m2": 0.5, "optional": true, "note": "Ja estrich"},
+        {"name": "PU11", "per_m2": 2.5, "role": "Izlīdzinošais slānis"},
+        {"name": "PU23 (matētais)", "per_m2": 0.1, "role": "Finišs"}
+      ]
+    }
+  ],
+  "calendar": {
+    "weekend": ["S", "Sv"],
+    "work_start": "08:00",
+    "work_end": "17:00",
+    "break_min": 60,
+    "auto_shift": true,
+    "warn_holiday": true,
+    "allow_overlap": false,
+    "confirm_delete": true,
+    "first_day": "monday",
+    "color_by": "object",
+    "show_initials": true,
+    "holidays": [
+      {"date": "2026-05-01", "name": "Darba svētki"},
+      {"date": "2026-05-04", "name": "Latvijas Republikas Neatkarības atjaunošanas diena"},
+      {"date": "2026-06-23", "name": "Līgo diena"},
+      {"date": "2026-06-24", "name": "Jāņu diena"},
+      {"date": "2026-11-18", "name": "Latvijas Republikas proklamēšanas diena"}
+    ]
+  },
+  "projects": [
+    {
+      "seed_key": "obj-75",
+      "client": "Terēze Bērzupe",
+      "address": "Brīvības iela 142, Rīga",
+      "system": "Pārslu epoksīda sistēma (pilnībā apbērta)",
+      "status": "in_progress",
+      "color": "#2C5F2E",
+      "total_m2": 300,
+      "start_date": "2026-04-15",
+      "end_date": "2026-05-20",
+      "assigned_to": "arturs",
+      "tasks": [
+        {"name": "Virsmas slīpēšana", "unit": "m²", "quantity_total": 300},
+        {"name": "EP02 Color ieklāšana", "unit": "m²", "quantity_total": 300},
+        {"name": "Pārslas beršana", "unit": "m²", "quantity_total": 300}
+      ],
+      "materials": [
+        {"name": "EP02 Color", "color": "RAL7001", "needed": 150, "taken": 100, "per_m2": 0.5},
+        {"name": "EP11", "color": "", "needed": 300, "taken": 0, "per_m2": 1.0},
+        {"name": "EP22", "color": "", "needed": 150, "taken": 150, "per_m2": 0.5},
+        {"name": "Akrila Pārslas", "color": "Mix", "needed": 210, "taken": 70, "per_m2": 0.7},
+        {"name": "Kvarca smilts", "color": "0.3-0.8mm", "needed": 750, "taken": 500, "per_m2": 2.5}
+      ]
+    },
+    {
+      "seed_key": "obj-87",
+      "client": "AutoGurijs",
+      "address": "Krasta iela 30, Rīga",
+      "system": "Neslīdošā epoksīda sistēma",
+      "status": "closed",
+      "color": "#F4A442",
+      "total_m2": 40,
+      "start_date": "2026-04-02",
+      "end_date": "2026-04-10",
+      "closed_at": "2026-04-10T16:00:00+03:00",
+      "assigned_to": "denis",
+      "tasks": [
+        {"name": "Virsmas slīpēšana", "unit": "m²", "quantity_total": 40},
+        {"name": "EP12 ieklāšana", "unit": "m²", "quantity_total": 40},
+        {"name": "Kvarca beršana", "unit": "m²", "quantity_total": 40}
+      ],
+      "materials": [
+        {"name": "EP12", "color": "", "needed": 40, "taken": 40, "per_m2": 1.0},
+        {"name": "Kvarca smilts", "color": "0.8-1.2mm", "needed": 80, "taken": 80, "per_m2": 2.0},
+        {"name": "PU-Satin", "color": "", "needed": 12, "taken": 12, "per_m2": 0.3}
+      ]
+    },
+    {
+      "seed_key": "obj-76",
+      "client": "Maira Meļķe",
+      "address": "Mežciema iela 12, Rīga",
+      "system": "Gludā epoksīda sistēma",
+      "status": "in_progress",
+      "color": "#5B7DB1",
+      "total_m2": 300,
+      "start_date": "2026-04-22",
+      "end_date": "2026-06-05",
+      "assigned_to": "igors",
+      "tasks": [
+        {"name": "Virsmas slīpēšana", "unit": "m²", "quantity_total": 300},
+        {"name": "EP02 ieklāšana", "unit": "m²", "quantity_total": 300},
+        {"name": "Lakas klājums", "unit": "m²", "quantity_total": 300}
+      ],
+      "materials": [
+        {"name": "EP02", "color": "RAL7035", "needed": 300, "taken": 150, "per_m2": 1.0},
+        {"name": "EP11", "color": "", "needed": 150, "taken": 75, "per_m2": 0.5},
+        {"name": "PU-Satin", "color": "", "needed": 90, "taken": 30, "per_m2": 0.3}
+      ]
+    },
+    {
+      "seed_key": "obj-89",
+      "client": "Atra Sistēma",
+      "address": "Daugavgrīvas šoseja 5",
+      "system": "Neslīdošā epoksīda sistēma",
+      "status": "in_progress",
+      "color": "#A66A8E",
+      "total_m2": 10,
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-12",
+      "assigned_to": "janis",
+      "tasks": [
+        {"name": "Virsmas slīpēšana", "unit": "m²", "quantity_total": 10},
+        {"name": "EP12 ieklāšana", "unit": "m²", "quantity_total": 10}
+      ],
+      "materials": [
+        {"name": "EP12", "color": "", "needed": 10, "taken": 5, "per_m2": 1.0},
+        {"name": "Kvarca smilts", "color": "0.3-0.8mm", "needed": 20, "taken": 10, "per_m2": 2.0}
+      ]
+    },
+    {
+      "seed_key": "obj-92",
+      "client": "BūveLat SIA",
+      "address": "Rūpniecības iela 1, Olaine",
+      "system": "Izlīdzinošā epoksīda sistēma",
+      "status": "open",
+      "color": "#6E5B8A",
+      "total_m2": 850,
+      "start_date": "2026-05-20",
+      "end_date": "2026-07-15",
+      "assigned_to": "arturs",
+      "tasks": [
+        {"name": "Virsmas slīpēšana", "unit": "m²", "quantity_total": 850},
+        {"name": "EP01 ieklāšana", "unit": "m²", "quantity_total": 850}
+      ],
+      "materials": [
+        {"name": "EP01", "color": "", "needed": 850, "taken": 0, "per_m2": 1.0},
+        {"name": "Kvarca smilts", "color": "0.1-0.3mm", "needed": 1700, "taken": 0, "per_m2": 2.0}
+      ]
+    }
+  ],
+  "jobs": [
+    {"project": "obj-75", "assigned_to": "arturs", "starts_at": "2026-05-04T08:00:00+03:00", "ends_at": "2026-05-08T17:00:00+03:00"},
+    {"project": "obj-75", "assigned_to": "kristians", "starts_at": "2026-05-04T08:00:00+03:00", "ends_at": "2026-05-08T17:00:00+03:00"},
+    {"project": "obj-87", "assigned_to": "denis", "starts_at": "2026-05-04T08:00:00+03:00", "ends_at": "2026-05-06T17:00:00+03:00"},
+    {"project": "obj-76", "assigned_to": "igors", "starts_at": "2026-05-06T08:00:00+03:00", "ends_at": "2026-05-15T17:00:00+03:00"},
+    {"project": "obj-76", "assigned_to": "maris", "starts_at": "2026-05-06T08:00:00+03:00", "ends_at": "2026-05-15T17:00:00+03:00"},
+    {"project": "obj-89", "assigned_to": "janis", "starts_at": "2026-05-11T08:00:00+03:00", "ends_at": "2026-05-12T17:00:00+03:00"},
+    {"project": "obj-75", "assigned_to": "arturs", "starts_at": "2026-05-12T08:00:00+03:00", "ends_at": "2026-05-15T17:00:00+03:00"},
+    {"project": "obj-75", "assigned_to": "kristians", "starts_at": "2026-05-12T08:00:00+03:00", "ends_at": "2026-05-15T17:00:00+03:00"},
+    {"project": "obj-75", "assigned_to": "denis", "starts_at": "2026-05-12T08:00:00+03:00", "ends_at": "2026-05-15T17:00:00+03:00"},
+    {"project": "obj-76", "assigned_to": "igors", "starts_at": "2026-05-18T08:00:00+03:00", "ends_at": "2026-05-22T17:00:00+03:00"},
+    {"project": "obj-92", "assigned_to": "arturs", "starts_at": "2026-05-20T08:00:00+03:00", "ends_at": "2026-05-29T17:00:00+03:00"},
+    {"project": "obj-92", "assigned_to": "kristians", "starts_at": "2026-05-20T08:00:00+03:00", "ends_at": "2026-05-29T17:00:00+03:00"},
+    {"project": "obj-92", "assigned_to": "denis", "starts_at": "2026-05-20T08:00:00+03:00", "ends_at": "2026-05-29T17:00:00+03:00"},
+    {"project": "obj-92", "assigned_to": "igors", "starts_at": "2026-05-20T08:00:00+03:00", "ends_at": "2026-05-29T17:00:00+03:00"},
+    {"project": "obj-75", "assigned_to": "maris", "starts_at": "2026-05-25T08:00:00+03:00", "ends_at": "2026-05-28T17:00:00+03:00"}
+  ],
+  "reports": [
+    {
+      "project": "obj-75",
+      "recorded_by": "arturs",
+      "work_date": "2026-04-18",
+      "notes": "Virsmas sagatavošana pabeigta",
+      "task_lines": [{"task": "Virsmas slīpēšana", "quantity": 300}]
+    },
+    {
+      "project": "obj-75",
+      "recorded_by": "arturs",
+      "work_date": "2026-05-06",
+      "notes": "45m² EP22, 45m² Pārslas",
+      "task_lines": [
+        {"task": "EP02 Color ieklāšana", "quantity": 100},
+        {"task": "Pārslas beršana", "quantity": 50}
+      ]
+    },
+    {
+      "project": "obj-76",
+      "recorded_by": "kristians",
+      "work_date": "2026-05-06",
+      "notes": "30m² Slīpēšana, 30m² EP02",
+      "task_lines": [
+        {"task": "Virsmas slīpēšana", "quantity": 300},
+        {"task": "EP02 ieklāšana", "quantity": 30}
+      ]
+    },
+    {
+      "project": "obj-87",
+      "recorded_by": "denis",
+      "work_date": "2026-04-10",
+      "notes": "Pabeigts — finiš pārbaude",
+      "task_lines": [
+        {"task": "Virsmas slīpēšana", "quantity": 40},
+        {"task": "EP12 ieklāšana", "quantity": 40},
+        {"task": "Kvarca beršana", "quantity": 40}
+      ]
+    },
+    {
+      "project": "obj-76",
+      "recorded_by": "igors",
+      "work_date": "2026-05-06",
+      "notes": "20m² EP02 ieklāšana",
+      "task_lines": [{"task": "EP02 ieklāšana", "quantity": 70}]
+    },
+    {
+      "project": "obj-89",
+      "recorded_by": "janis",
+      "work_date": "2026-05-06",
+      "notes": "Kāpņu posms",
+      "task_lines": [
+        {"task": "Virsmas slīpēšana", "quantity": 10},
+        {"task": "EP12 ieklāšana", "quantity": 2}
+      ]
+    }
+  ]
+}

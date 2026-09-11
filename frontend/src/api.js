@@ -58,12 +58,6 @@ export async function fetchMe() {
   return res.json();
 }
 
-export async function fetchDashboard() {
-  const res = await api("/api/dashboard/");
-  if (!res.ok) throw new Error(t("api.loadData"));
-  return res.json();
-}
-
 export async function fetchDashboardStats(from, to) {
   const query = new URLSearchParams(
     Object.fromEntries(
@@ -148,6 +142,18 @@ export const updateProject = (id, payload) =>
   jsonCall(`/api/projects/${id}/`, { method: "PATCH", body: JSON.stringify(payload) }, t("api.saveProject"));
 export const closeProject = (id) =>
   jsonCall(`/api/projects/${id}/close/`, { method: "POST" }, t("api.closeProject"));
+export const discardProject = (id) =>
+  jsonCall(`/api/projects/${id}/discard/`, { method: "POST" }, t("api.discardProject"));
+export const restoreProject = (id) =>
+  jsonCall(`/api/projects/${id}/restore/`, { method: "POST" }, t("api.restoreProject"));
+export const purgeProject = async (id) => {
+  const res = await api(`/api/projects/${id}/`, { method: "DELETE" });
+  if (!res.ok && res.status !== 204) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(errorFromResponse(data, t("api.purgeProject")));
+  }
+  return true;
+};
 export const setProjectStatus = (id, nextStatus) =>
   jsonCall(
     `/api/projects/${id}/set-status/`,
@@ -212,3 +218,33 @@ export const fetchJobs = (params = {}) => {
 };
 export const createJob = (payload) =>
   jsonCall("/api/jobs/", { method: "POST", body: JSON.stringify(payload) }, t("api.createJob"));
+
+function mapSystem(row) {
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    needsColor: !!row.needs_color,
+    layers: (row.layers || []).map((layer) => ({
+      name: layer.name,
+      perM2: Number(layer.per_m2) || 0,
+      role: layer.role || "",
+      optional: !!layer.optional,
+      note: layer.note || "",
+    })),
+  };
+}
+
+export async function fetchSystems() {
+  const rows = await jsonCall("/api/systems/", {}, t("api.loadSystems"));
+  return (Array.isArray(rows) ? rows : []).map(mapSystem);
+}
+
+export const fetchCalendarSettings = () =>
+  jsonCall("/api/calendar-settings/", {}, t("api.loadCalendarSettings"));
+export const saveCalendarSettings = (payload) =>
+  jsonCall(
+    "/api/calendar-settings/",
+    { method: "PUT", body: JSON.stringify(payload) },
+    t("api.saveCalendarSettings")
+  );

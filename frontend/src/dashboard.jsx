@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import Icon from "./icons";
 import PeriodPicker, { formatPeriod } from "./period-picker";
-import { fetchDashboardStats } from "./api";
+import { closeProject, discardProject, fetchDashboardStats } from "./api";
+import { OBJECT_STATUS_LABEL, objectStatusClass, objectUiStatus } from "./object-status";
 import { useI18n } from "./i18n";
-import { STATUS_LABEL, statusClass } from "./projects";
 
 const PALETTE = ["#2C5F2E", "#5B7DB1", "#F4A442", "#A66A8E", "#6E5B8A", "#7A8B5C", "#B85C5C", "#5C8B8B"];
 
@@ -15,9 +15,6 @@ const currentMonth = () => {
   const pad = (n) => String(n).padStart(2, "0");
   return { from: `${y}-${pad(m)}-01`, to: `${y}-${pad(m)}-${pad(last)}` };
 };
-
-const money = (v, locale) =>
-  Number(v || 0).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const qty = (v, locale) => {
   const n = Number(v || 0);
@@ -31,38 +28,61 @@ const Dashboard = ({ user, onNavigate, onSelectObject }) => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [busyId, setBusyId] = useState(null);
   const periodLabel = formatPeriod(period.from, period.to, t);
+  const isAdmin = user?.role === "ADMINISTRATORS";
+
+  const load = async () => {
+    setLoading(true);
+    setErr("");
+    try {
+      setStats(await fetchDashboardStats(period.from, period.to));
+    } catch (error) {
+      setStats(null);
+      setErr(error.message || t("dashboard.loadFailed"));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setErr("");
-      try {
-        const data = await fetchDashboardStats(period.from, period.to);
-        if (!cancelled) setStats(data);
-      } catch (error) {
-        if (!cancelled) {
-          setStats(null);
-          setErr(error.message || t("dashboard.loadFailed"));
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    load();
   }, [period.from, period.to, t]);
 
   const projects = stats?.projects || {};
-  const inventory = stats?.inventory || {};
   const periodStats = stats?.period || {};
   const items = projects.items || [];
   const materials = stats?.material_usage || [];
-  const activity = stats?.activity || [];
-  const todayJobs = stats?.today_jobs || [];
-  const expenseDelta = Number(periodStats.expenses_delta || 0);
+  const todayReports = stats?.today_reports?.length ? stats.today_reports : stats?.today_jobs || [];
+  const monthDelta = Number(periodStats.done_m2_delta || 0);
+
+  const completeObject = async (p) => {
+    const client = p.client || p.name;
+    if (!window.confirm(t("dashboard.completeConfirm", { id: p.id, client }))) return;
+    setBusyId(p.id);
+    try {
+      await closeProject(p.id);
+      await load();
+    } catch (error) {
+      setErr(error.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const deleteObject = async (p) => {
+    const client = p.client || p.name;
+    if (!window.confirm(t("dashboard.deleteConfirm", { id: p.id, client }))) return;
+    setBusyId(p.id);
+    try {
+      await discardProject(p.id);
+      await load();
+    } catch (error) {
+      setErr(error.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   return (
     <div className="page">
@@ -83,54 +103,51 @@ const Dashboard = ({ user, onNavigate, onSelectObject }) => {
       {err && <div className="login-err">{err}</div>}
 
       <section className="kpis">
-        <button type="button" className="kpi kpi-btn" onClick={() => onNavigate("projects")}>
+        <div className="kpi">
           <div className="kpi-label">{t("dashboard.activeProjects")}</div>
           <div className="kpi-value mono">{loading ? "—" : projects.active || 0}</div>
           <div className="kpi-meta">
             {t("dashboard.projectMeta", {
-              open: projects.open || 0,
-              progress: projects.in_progress || 0,
-              review: projects.in_review || 0,
+              planned: projects.planned || projects.open || 0,
+              completed: projects.closed || 0,
             })}
-          </div>
-        </button>
-        <div className="kpi">
-          <div className="kpi-label">{t("dashboard.periodExpenses", { period: periodLabel })}</div>
-          <div className="kpi-value mono">
-            {loading ? "—" : money(periodStats.expenses, dateLocale)}
-            <span className="kpi-unit">€</span>
-          </div>
-          <div className={`kpi-meta ${expenseDelta >= 0 ? "accent-up" : "accent-down"}`}>
-            {t("dashboard.vsPrev", { delta: `${expenseDelta >= 0 ? "+" : ""}${expenseDelta}` })}
           </div>
         </div>
-        <button type="button" className="kpi kpi-btn" onClick={() => onNavigate("tools")}>
-          <div className="kpi-label">{t("dashboard.toolsInUse")}</div>
-          <div className="kpi-value mono">{loading ? "—" : qty(inventory.tools_borrowed, dateLocale)}</div>
-          <div className="kpi-meta">
-            {t("dashboard.toolsMeta", {
-              available: qty(inventory.tools_available, dateLocale),
-              stock: qty(inventory.tools_stock, dateLocale),
-            })}
+        <div className="kpi">
+          <div className="kpi-label">{t("dashboard.avgProgress")}</div>
+          <div className="kpi-value mono">
+            {loading ? "—" : projects.avg_progress || 0}
+            <span className="kpi-unit">%</span>
           </div>
-        </button>
-        <button type="button" className="kpi kpi-btn" onClick={() => onNavigate("materials")}>
-          <div className="kpi-label">{t("dashboard.materials")}</div>
-          <div className="kpi-value mono">{loading ? "—" : inventory.materials || 0}</div>
           <div className="kpi-meta">
-            {t("dashboard.materialsMeta", {
-              warehouses: inventory.warehouses || 0,
-              low: inventory.shortages || 0,
-            })}
+            {qty(projects.done_m2, dateLocale)} / {qty(projects.total_m2, dateLocale)} m²
           </div>
-        </button>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">{t("dashboard.periodDone", { period: periodLabel })}</div>
+          <div className="kpi-value mono">
+            {loading ? "—" : qty(periodStats.done_m2, dateLocale)}
+            <span className="kpi-unit">m²</span>
+          </div>
+          <div className={`kpi-meta ${monthDelta >= 0 ? "accent-up" : "accent-down"}`}>
+            {t("dashboard.vsPrev", { delta: `${monthDelta >= 0 ? "+" : ""}${monthDelta}` })}
+          </div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">{t("dashboard.totalVolume")}</div>
+          <div className="kpi-value mono">
+            {loading ? "—" : qty(projects.ever_m2, dateLocale)}
+            <span className="kpi-unit">m²</span>
+          </div>
+          <div className="kpi-meta">{t("dashboard.totalMeta", { n: projects.total || 0 })}</div>
+        </div>
       </section>
 
       <div className="grid-2">
         <section className="card">
           <div className="card-head">
             <h2 className="card-title">{t("dashboard.projectOverview")}</h2>
-            <button type="button" className="link" onClick={() => onNavigate("projects")}>{t("dashboard.allProjects")}</button>
+            <button type="button" className="link" onClick={() => onNavigate("reports")}>{t("dashboard.allReports")}</button>
           </div>
           {loading ? (
             <div className="muted small">{t("common.loading")}</div>
@@ -139,22 +156,52 @@ const Dashboard = ({ user, onNavigate, onSelectObject }) => {
           ) : (
             <div className="obj-list">
               {items.map((p) => {
-                const pct = p.material_pct || 0;
+                const pct = p.progress_pct || 0;
+                const ui = objectUiStatus(p.status);
+                const label = p.client || p.name;
+                const color = p.color || PALETTE[p.id % PALETTE.length];
                 return (
-                  <div key={p.id} className="obj-row clickable" onClick={() => onSelectObject && onSelectObject(p.id)}>
+                  <div key={p.id} className="obj-row">
                     <div className="obj-row-head">
-                      <span className="obj-dot" style={{ background: PALETTE[p.id % PALETTE.length] }} />
+                      <span className="obj-dot" style={{ background: color }} />
                       <span className="obj-id mono">#{p.id}</span>
-                      <span className="obj-name">{p.name}</span>
-                      <span className={`status ${statusClass(p.status)}`}>{t(STATUS_LABEL[p.status])}</span>
+                      <button
+                        type="button"
+                        className="obj-name"
+                        style={{ background: "none", border: 0, padding: 0, textAlign: "left", flex: 1, cursor: "pointer", fontWeight: 600 }}
+                        onClick={() => onSelectObject && onSelectObject(p.id)}
+                      >
+                        {label}
+                      </button>
+                      <span className={objectStatusClass(p.status)}>{t(OBJECT_STATUS_LABEL[ui])}</span>
                       <span className="obj-pct mono">{pct}%</span>
+                      {isAdmin && ui !== "completed" && (
+                        <button
+                          className="icon-btn sm"
+                          title={t("dashboard.completeObject")}
+                          disabled={busyId === p.id}
+                          onClick={() => completeObject(p)}
+                        >
+                          <Icon name="check" size={13} />
+                        </button>
+                      )}
+                      {isAdmin && (
+                        <button
+                          className="icon-btn sm danger"
+                          title={t("dashboard.deleteObject")}
+                          disabled={busyId === p.id}
+                          onClick={() => deleteObject(p)}
+                        >
+                          <Icon name="trash" size={13} />
+                        </button>
+                      )}
                     </div>
                     <div className="bar">
-                      <div className="bar-fill" style={{ width: pct + "%" }} />
+                      <div className="bar-fill" style={{ width: pct + "%", background: ui === "completed" ? "#4CAF50" : "#2C5F2E" }} />
                     </div>
                     <div className="obj-row-meta">
-                      <span>{p.assigned_to?.name || t("common.dash")} · {p.client || p.address || t("common.dash")}</span>
-                      <span className="mono">{money(p.expenses_total, dateLocale)} €</span>
+                      <span>{p.system || p.address || t("common.dash")}</span>
+                      <span className="mono">{qty(p.done_m2, dateLocale)} / {qty(p.total_m2, dateLocale)} m²</span>
                     </div>
                   </div>
                 );
@@ -166,27 +213,30 @@ const Dashboard = ({ user, onNavigate, onSelectObject }) => {
         <section className="card">
           <div className="card-head">
             <h2 className="card-title">{t("dashboard.jobsToday")}</h2>
-            <span className="badge">{t("dashboard.entries", { n: todayJobs.length })}</span>
+            <span className="badge">{t("dashboard.entries", { n: todayReports.length })}</span>
           </div>
           {loading ? (
             <div className="muted small">{t("common.loading")}</div>
-          ) : todayJobs.length === 0 ? (
+          ) : todayReports.length === 0 ? (
             <div className="muted small">{t("dashboard.noJobs")}</div>
           ) : (
             <div className="reports-feed">
-              {todayJobs.map((job) => (
-                <div key={job.id} className="feed-row">
-                  <div className="avatar sm">{job.initials || "?"}</div>
+              {todayReports.map((row) => (
+                <div key={row.id} className="feed-row">
+                  <div className="avatar sm">{row.worker || row.initials || "?"}</div>
                   <div className="feed-body">
                     <div className="feed-line">
-                      <strong>{job.assigned_to}</strong>
+                      <strong>{row.worker_name || row.assigned_to || row.worker}</strong>
                       <span className="muted">·</span>
-                      <span>{job.project}</span>
+                      {row.object_id || row.project_id ? <span className="mono small">#{row.object_id || row.project_id}</span> : null}
+                      <span>{row.client || row.project}</span>
                     </div>
-                    <div className="feed-sub">{job.client || t("common.dash")}</div>
+                    <div className="feed-sub">{row.summary || t("common.dash")}</div>
                   </div>
                   <div className="feed-time mono">
-                    {new Date(job.starts_at).toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" })}
+                    {row.created_at || row.starts_at
+                      ? new Date(row.created_at || row.starts_at).toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" })
+                      : ""}
                   </div>
                 </div>
               ))}
@@ -217,34 +267,9 @@ const Dashboard = ({ user, onNavigate, onSelectObject }) => {
                     <span className="mono small">{qty(spent, dateLocale)}/{qty(needed, dateLocale)} {m.unit}</span>
                   </div>
                   <div className="bar sm"><div className="bar-fill" style={{ width: pct + "%" }} /></div>
-                  <div className="muted tiny">{t("dashboard.stock", { n: `${qty(m.stock, dateLocale)} ${m.unit}` })}</div>
                 </div>
               );
             })}
-          </div>
-        )}
-      </section>
-
-      <section className="card">
-        <div className="card-head">
-          <h2 className="card-title">{t("dashboard.recentActivity")}</h2>
-          <span className="badge">{t("dashboard.entries", { n: activity.length })}</span>
-        </div>
-        {loading ? (
-          <div className="muted small">{t("common.loading")}</div>
-        ) : activity.length === 0 ? (
-          <div className="muted small">{t("dashboard.noActivity")}</div>
-        ) : (
-          <div className="activity-list">
-            {activity.map((a) => (
-              <div key={a.id} className="activity-row">
-                <div className="activity-date">{new Date(a.created_at).toLocaleString(dateLocale)}</div>
-                <div>
-                  <div className="activity-title">{a.summary}</div>
-                  <div className="activity-sub">{a.user?.name || t("common.dash")} · {a.entity_type}</div>
-                </div>
-              </div>
-            ))}
           </div>
         )}
       </section>

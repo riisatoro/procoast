@@ -53,6 +53,9 @@ class Project(models.Model):
         IN_PROGRESS = "in_progress", "Procesā"
         IN_REVIEW = "in_review", "Pārbaudē"
         CLOSED = "closed", "Slēgts"
+        DELETED = "deleted", "Dzēsts"
+
+    ARCHIVED_STATUSES = (Status.CLOSED, Status.DELETED)
 
     name = models.CharField(max_length=200)
     client = models.CharField(max_length=200, blank=True)
@@ -60,9 +63,12 @@ class Project(models.Model):
     description = models.TextField(blank=True)
     assigned_to = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="assigned_projects",
     )
+    seed_key = models.CharField(max_length=64, unique=True, null=True, blank=True)
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.OPEN
     )
@@ -376,3 +382,78 @@ class ActivityLog(models.Model):
         indexes = [
             models.Index(fields=["user", "-created_at"]),
         ]
+
+
+class CoatingSystem(models.Model):
+    code = models.CharField(max_length=16, unique=True)
+    name = models.CharField(max_length=200)
+    needs_color = models.BooleanField(default=False)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "code"]
+
+    def __str__(self):
+        return f"{self.code} {self.name}"
+
+
+class CoatingSystemLayer(models.Model):
+    system = models.ForeignKey(
+        CoatingSystem, on_delete=models.CASCADE, related_name="layers"
+    )
+    name = models.CharField(max_length=200)
+    per_m2 = models.DecimalField(max_digits=10, decimal_places=3, default=0)
+    role = models.CharField(max_length=80, blank=True)
+    optional = models.BooleanField(default=False)
+    note = models.CharField(max_length=255, blank=True)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "id"]
+
+    def __str__(self):
+        return f"{self.system.code} / {self.name}"
+
+
+class CalendarHoliday(models.Model):
+    date = models.DateField(unique=True)
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        ordering = ["date"]
+
+    def __str__(self):
+        return f"{self.date} {self.name}"
+
+
+class CalendarSettings(models.Model):
+    weekend = models.JSONField(default=list)
+    work_start = models.CharField(max_length=5, default="08:00")
+    work_end = models.CharField(max_length=5, default="17:00")
+    break_min = models.PositiveIntegerField(default=60)
+    auto_shift = models.BooleanField(default=True)
+    warn_holiday = models.BooleanField(default=True)
+    allow_overlap = models.BooleanField(default=False)
+    confirm_delete = models.BooleanField(default=True)
+    first_day = models.CharField(max_length=8, default="monday")
+    color_by = models.CharField(max_length=16, default="object")
+    show_initials = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = "calendar settings"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        pass
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(
+            pk=1,
+            defaults={"weekend": ["S", "Sv"]},
+        )
+        return obj

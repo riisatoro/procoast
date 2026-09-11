@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Icon from "./icons";
-import { fetchActivity, fetchJobs, fetchProjects, fetchUsers } from "./api";
-import { loadCalSettings, workHoursLength, ymd } from "./cal-settings";
+import { fetchActivity, fetchCalendarSettings, fetchJobs, fetchProjects, fetchUsers } from "./api";
+import { DEFAULT_CAL_SETTINGS, settingsFromApi, workHoursLength, ymd } from "./cal-settings";
 import { STATUS_LABEL, statusClass } from "./projects";
 import { useI18n } from "./i18n";
 
@@ -13,7 +13,7 @@ const mondayOf = (d) => {
   return date;
 };
 
-const hoursOnDay = (job, dateStr, defaultH) => {
+const hoursOnDay = (job, dateStr, defaultH, workStart = "08:00", workEnd = "17:00") => {
   const startDay = ymd(new Date(job.starts_at));
   const endDay = job.ends_at ? ymd(new Date(job.ends_at)) : startDay;
   if (dateStr < startDay || dateStr > endDay) return 0;
@@ -25,12 +25,12 @@ const hoursOnDay = (job, dateStr, defaultH) => {
     return defaultH;
   }
   if (dateStr === startDay) {
-    const endOfWork = new Date(`${dateStr}T17:00:00`);
+    const endOfWork = new Date(`${dateStr}T${workEnd}:00`);
     const h = (endOfWork - new Date(job.starts_at)) / 3600000;
     return Math.max(0.5, Math.round(h * 10) / 10);
   }
   if (dateStr === endDay && job.ends_at) {
-    const startOfWork = new Date(`${dateStr}T08:00:00`);
+    const startOfWork = new Date(`${dateStr}T${workStart}:00`);
     const h = (new Date(job.ends_at) - startOfWork) / 3600000;
     return Math.max(0.5, Math.round(h * 10) / 10);
   }
@@ -45,8 +45,8 @@ const WorkerProfile = ({ user, profileUserId, onBack, onSelectObject }) => {
   const [logs, setLogs] = useState([]);
   const [assigned, setAssigned] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const [settings, setSettings] = useState(DEFAULT_CAL_SETTINGS);
 
-  const settings = loadCalSettings();
   const defaultH = workHoursLength(settings) || 8;
   const now = new Date();
   const weekStart = mondayOf(now);
@@ -67,15 +67,17 @@ const WorkerProfile = ({ user, profileUserId, onBack, onSelectObject }) => {
       if (cancelled) return;
       setTarget(next);
       try {
-        const [acts, projects, jobRows] = await Promise.all([
+        const [acts, projects, jobRows, cal] = await Promise.all([
           fetchActivity(next.id),
           fetchProjects(),
           fetchJobs({ assigned_to: next.id }),
+          fetchCalendarSettings().catch(() => null),
         ]);
         if (cancelled) return;
         setLogs(Array.isArray(acts) ? acts : []);
         setAssigned((Array.isArray(projects) ? projects : []).filter((p) => p.assigned_to?.id === next.id));
         setJobs(Array.isArray(jobRows) ? jobRows : []);
+        if (cal) setSettings(settingsFromApi(cal));
       } catch {
         if (!cancelled) {
           setLogs([]);
@@ -96,7 +98,7 @@ const WorkerProfile = ({ user, profileUserId, onBack, onSelectObject }) => {
       const d = new Date(weekStart);
       d.setDate(weekStart.getDate() + i);
       const ds = ymd(d);
-      const hours = jobs.reduce((s, job) => s + hoursOnDay(job, ds, defaultH), 0);
+      const hours = jobs.reduce((s, job) => s + hoursOnDay(job, ds, defaultH, settings.workStart, settings.workEnd), 0);
       return {
         date: ds,
         dayNum: d.getDate(),
@@ -107,7 +109,7 @@ const WorkerProfile = ({ user, profileUserId, onBack, onSelectObject }) => {
         isHoliday: holidays.some((h) => h.date === ds),
       };
     });
-  }, [jobs, weekStart, defaultH, todayStr, settings.weekend, holidays]);
+  }, [jobs, weekStart, defaultH, todayStr, settings.weekend, settings.workStart, settings.workEnd, holidays]);
 
   const sumHours = (start, end) => {
     let total = 0;

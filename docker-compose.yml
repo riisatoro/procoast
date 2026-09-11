@@ -36,5 +36,11 @@ services:
     depends_on:
       - procoast-be
 
+  procoast-ui-example:
+    build: ./ui-example
+    container_name: procoast-ui-example
+    ports:
+      - "3020:3020"
+
 volumes:
   procoast_pgdata:
