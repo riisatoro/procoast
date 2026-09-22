@@ -12,6 +12,7 @@ import UsersPage from "./users";
 import ProjectsPage from "./projects";
 import Archive from "./archive";
 import ObjectDetail from "./object-detail";
+import ReportDetail from "./report-detail";
 import WorkerProfile from "./worker-profile";
 import NewObjectModal from "./new-object";
 import Icon from "./icons";
@@ -33,6 +34,7 @@ const MAIN_SECTIONS = new Set([
   "reports",
   "object-detail",
   "profile",
+  "report-detail",
 ]);
 const ADMIN_ONLY_SECTIONS = new Set(["dashboard", "users", "archive"]);
 
@@ -59,15 +61,18 @@ function clearNav() {
 }
 
 function navForUser(user, saved) {
-  const fallback = { section: defaultSection(user), detailObjectId: null, profileUserId: null };
+  const fallback = { section: defaultSection(user), detailObjectId: null, profileUserId: null, reportId: null, reportReturn: null };
   if (!saved) return fallback;
   if (ADMIN_ONLY_SECTIONS.has(saved.section) && user.role !== "ADMINISTRATORS") return fallback;
   if (saved.section === "object-detail" && saved.detailObjectId == null) return fallback;
   if (saved.section === "profile" && saved.profileUserId == null) return fallback;
+  if (saved.section === "report-detail" && saved.reportId == null) return fallback;
   return {
     section: saved.section,
     detailObjectId: saved.section === "object-detail" ? saved.detailObjectId : null,
     profileUserId: saved.section === "profile" ? saved.profileUserId : null,
+    reportId: saved.section === "report-detail" ? saved.reportId : null,
+    reportReturn: saved.section === "report-detail" ? saved.reportReturn || null : null,
   };
 }
 
@@ -84,6 +89,8 @@ const App = () => {
   const [showNotif, setShowNotif] = useState(false);
   const [detailObjectId, setDetailObjectId] = useState(null);
   const [profileUserId, setProfileUserId] = useState(null);
+  const [reportId, setReportId] = useState(null);
+  const [reportReturn, setReportReturn] = useState(null);
   const [notifItems, setNotifItems] = useState([]);
   const [notifSeen, setNotifSeen] = useState(loadNotifSeen);
   const [rev, setRev] = useState(0);
@@ -104,13 +111,15 @@ const App = () => {
       setSection("dashboard");
       setDetailObjectId(null);
       setProfileUserId(null);
+      setReportId(null);
+      setReportReturn(null);
     });
   }, []);
 
   useEffect(() => {
     if (!user) return;
-    writeNav({ section, detailObjectId, profileUserId });
-  }, [user, section, detailObjectId, profileUserId]);
+    writeNav({ section, detailObjectId, profileUserId, reportId, reportReturn });
+  }, [user, section, detailObjectId, profileUserId, reportId, reportReturn]);
 
   useEffect(() => {
     if (!user) return;
@@ -134,6 +143,8 @@ const App = () => {
           setSection(nav.section);
           setDetailObjectId(nav.detailObjectId);
           setProfileUserId(nav.profileUserId);
+          setReportId(nav.reportId);
+          setReportReturn(nav.reportReturn);
         }
       } catch {
         clearSession();
@@ -152,7 +163,9 @@ const App = () => {
     setSection(home);
     setDetailObjectId(null);
     setProfileUserId(null);
-    writeNav({ section: home, detailObjectId: null, profileUserId: null });
+    setReportId(null);
+    setReportReturn(null);
+    writeNav({ section: home, detailObjectId: null, profileUserId: null, reportId: null, reportReturn: null });
     setRev((r) => r + 1);
   };
 
@@ -163,30 +176,71 @@ const App = () => {
     setSection("dashboard");
     setDetailObjectId(null);
     setProfileUserId(null);
+    setReportId(null);
+    setReportReturn(null);
   };
 
   const navigateSection = (s) => {
-    if ((s === "reports" || s === "materials" || s === "tools") && detailObjectId) {
+    if ((s === "reports" || s === "materials" || s === "tools" || s === "warehouses") && detailObjectId) {
       rememberProject(detailObjectId);
     }
     setDetailObjectId(null);
     setProfileUserId(null);
+    setReportId(null);
+    setReportReturn(null);
     setSection(s);
   };
 
   const openObjectDetail = (id) => {
     rememberProject(id);
     setProfileUserId(null);
+    setReportId(null);
+    setReportReturn(null);
     setDetailObjectId(id);
     setSection("object-detail");
     setMobileNav(false);
+    setShowNotif(false);
   };
 
   const openProfile = (id) => {
     setDetailObjectId(null);
+    setReportId(null);
+    setReportReturn(null);
     setProfileUserId(id);
     setSection("profile");
     setMobileNav(false);
+    setShowNotif(false);
+  };
+
+  const openReport = (id) => {
+    if (id == null) return;
+    setReportReturn(
+      section === "report-detail"
+        ? reportReturn
+        : { section, detailObjectId, profileUserId }
+    );
+    setDetailObjectId(null);
+    setProfileUserId(null);
+    setReportId(id);
+    setSection("report-detail");
+    setMobileNav(false);
+    setShowNotif(false);
+  };
+
+  const closeReport = () => {
+    const back = reportReturn && typeof reportReturn === "object" ? reportReturn : { section: reportReturn };
+    if (back.section === "object-detail" && back.detailObjectId) {
+      openObjectDetail(back.detailObjectId);
+      return;
+    }
+    if (back.section === "profile" && back.profileUserId) {
+      openProfile(back.profileUserId);
+      return;
+    }
+    const dest = back.section && MAIN_SECTIONS.has(back.section) && back.section !== "report-detail"
+      ? back.section
+      : (isAdmin ? "archive" : "reports");
+    navigateSection(dest);
   };
 
   if (!ready) {
@@ -207,6 +261,7 @@ const App = () => {
         objectId={detailObjectId}
         onBack={() => navigateSection(isAdmin ? "dashboard" : "calendar")}
         onNavigate={navigateSection}
+        onOpenReport={openReport}
       />
     );
   } else if (section === "profile" && profileUserId) {
@@ -217,24 +272,43 @@ const App = () => {
         onBack={() => navigateSection("users")}
         onNavigate={navigateSection}
         onSelectObject={openObjectDetail}
+        onOpenReport={openReport}
+      />
+    );
+  } else if (section === "report-detail" && reportId) {
+    content = (
+      <ReportDetail
+        user={user}
+        reportId={reportId}
+        onBack={closeReport}
+        onSelectObject={openObjectDetail}
       />
     );
   } else {
     const sections = {
-      dashboard: <Dashboard key={rev} user={user} onNavigate={navigateSection} onSelectObject={openObjectDetail} />,
+      dashboard: <Dashboard key={rev} user={user} onNavigate={navigateSection} onSelectObject={openObjectDetail} onOpenReport={openReport} />,
       calendar: <CalendarView user={user} onSelectObject={openObjectDetail} />,
-      reports: <Reports user={user} />,
+      reports: <Reports user={user} onOpenReport={openReport} />,
       tools: <ToolsPage user={user} />,
       warehouses: <WarehousesPage user={user} />,
-      materials: <MaterialsPage user={user} />,
+      materials: <MaterialsPage user={user} onOpenWarehouse={() => navigateSection("warehouses")} />,
       projects: <ProjectsPage user={user} />,
-      archive: <Archive user={user} onSelectObject={openObjectDetail} />,
+      archive: <Archive user={user} onSelectObject={openObjectDetail} onOpenReport={openReport} />,
       users: <UsersPage user={user} onOpenProfile={openProfile} />,
     };
     content = sections[section] || sections.calendar;
   }
 
-  const navSection = section === "object-detail" ? "dashboard" : section === "profile" ? "users" : section;
+  const returnSection = reportReturn && typeof reportReturn === "object" ? reportReturn.section : reportReturn;
+  const navSection = section === "object-detail"
+    ? "dashboard"
+    : section === "profile"
+      ? "users"
+      : section === "report-detail"
+        ? (returnSection === "reports" || returnSection === "dashboard" || returnSection === "archive"
+          ? returnSection
+          : (isAdmin ? "archive" : "reports"))
+        : section;
 
   return (
     <div className="app">
@@ -266,6 +340,8 @@ const App = () => {
                 items={notifItems}
                 onClose={() => setShowNotif(false)}
                 onLoaded={setNotifItems}
+                onOpenReport={openReport}
+                onSelectObject={openObjectDetail}
                 onMarkAll={(iso) => {
                   saveNotifSeen(iso);
                   setNotifSeen(iso);

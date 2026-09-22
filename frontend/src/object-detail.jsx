@@ -1,31 +1,35 @@
 import { useEffect, useMemo, useState } from "react";
 import Icon from "./icons";
-import { fetchJobs, fetchProject } from "./api";
+import { fetchJobs, fetchProject, fetchReports } from "./api";
 import { STATUS_LABEL, statusClass } from "./projects";
+import { assigneeNames, projectAssignees } from "./assignees";
 import { useI18n } from "./i18n";
+import ReportEntry from "./report-entry";
 
 const PALETTE = ["#2C5F2E", "#5B7DB1", "#F4A442", "#A66A8E", "#6E5B8A", "#7A8B5C", "#B85C5C", "#5C8B8B"];
 const num = (v) => Number(v || 0);
 const day = (iso) => (iso ? String(iso).slice(0, 10) : "");
 
-const ObjectDetail = ({ user, objectId, onBack, onNavigate }) => {
-  const { t, dateLocale } = useI18n();
-  const isAdmin = user.role === "ADMINISTRATORS";
+const ObjectDetail = ({ objectId, onBack, onNavigate, onOpenReport }) => {
+  const { t } = useI18n();
   const [project, setProject] = useState(null);
   const [jobs, setJobs] = useState([]);
+  const [reports, setReports] = useState([]);
   const [err, setErr] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [p, jobRows] = await Promise.all([
+        const [p, jobRows, reportRows] = await Promise.all([
           fetchProject(objectId),
           fetchJobs({ project: objectId }),
+          fetchReports({ project: objectId }),
         ]);
         if (cancelled) return;
         setProject(p);
         setJobs(Array.isArray(jobRows) ? jobRows : []);
+        setReports(Array.isArray(reportRows) ? reportRows : []);
       } catch (e) {
         if (!cancelled) setErr(e.message);
       }
@@ -98,8 +102,6 @@ const ObjectDetail = ({ user, objectId, onBack, onNavigate }) => {
     return <div className="page"><section className="card muted">{err || t("common.loading")}</section></div>;
   }
 
-  const spendings = project.spendings || [];
-
   return (
     <div className="page">
       <header className="page-head obj-detail-head">
@@ -114,6 +116,9 @@ const ObjectDetail = ({ user, objectId, onBack, onNavigate }) => {
           </div>
           <h1 className="page-title">{project.client || project.name}</h1>
           <p className="page-sub"><Icon name="mapPin" size={12} /> {project.address || t("common.dash")}</p>
+          {projectAssignees(project).length > 0 && (
+            <p className="page-sub">{t("projects.assignee", { name: assigneeNames(project) })}</p>
+          )}
         </div>
         <div className="page-actions">
           <button className="btn btn-ghost" onClick={() => onNavigate("reports")}>
@@ -126,6 +131,13 @@ const ObjectDetail = ({ user, objectId, onBack, onNavigate }) => {
       </header>
 
       {err && <div className="login-err">{err}</div>}
+
+      {project.planned_days_exceeded && (
+        <div className="info-strip" style={{ marginBottom: 16 }}>
+          <Icon name="clock" size={14} />
+          <span>{t("object.overdueBanner", { planned: project.planned_days, elapsed: project.elapsed_days, overdue: project.overdue_days })}</span>
+        </div>
+      )}
 
       <section className="obj-stats-grid">
         <div className="obj-stat">
@@ -145,10 +157,14 @@ const ObjectDetail = ({ user, objectId, onBack, onNavigate }) => {
           <div className="obj-stat-val">{matPct}<span className="obj-stat-unit">%</span></div>
           <div className="obj-stat-meta">{t("object.taken", { taken: round(taken), needed: round(needed) })}</div>
         </div>
-        <div className="obj-stat">
+        <div className={`obj-stat ${project.planned_days_exceeded ? "warn" : ""}`}>
           <div className="obj-stat-label">{t("object.deadline")}</div>
           <div className="obj-stat-val mono" style={{ fontSize: 18 }}>{project.end_date || t("common.dash")}</div>
-          <div className="obj-stat-meta">{t("object.from", { date: project.start_date || day(project.created_at) })}</div>
+          <div className="obj-stat-meta">
+            {project.planned_days
+              ? t("object.plannedDaysMeta", { n: project.planned_days, date: project.start_date || day(project.created_at) })
+              : t("object.from", { date: project.start_date || day(project.created_at) })}
+          </div>
         </div>
       </section>
 
@@ -263,24 +279,17 @@ const ObjectDetail = ({ user, objectId, onBack, onNavigate }) => {
       <section className="card">
         <div className="card-head">
           <h2 className="card-title">{t("object.activity")}</h2>
-          <span className="badge">{t("object.entries", { n: spendings.length })}</span>
+          <span className="badge">{t("object.entries", { n: reports.length })}</span>
         </div>
-        <div className="activity-list">
-          {spendings.slice(0, 12).map((s) => (
-            <div key={s.id} className="activity-row">
-              <div className="activity-date">{new Date(s.created_at).toLocaleString(dateLocale)}</div>
-              <div>
-                <div className="activity-title">{t("object.takenKg", { qty: s.quantity })} <span className="muted">— {s.material_detail?.name}</span></div>
-                <div className="activity-sub">
-                  <span className="avatar xs" style={{ display: "inline-grid", marginRight: 6, verticalAlign: "middle" }}>{s.recorded_by?.initials}</span>
-                  {s.recorded_by?.name}
-                </div>
-              </div>
-              <div className="activity-hours mono">+{s.quantity} {s.material_detail?.unit}</div>
-            </div>
-          ))}
-          {!spendings.length && <div className="muted small">{t("object.noActivity")}</div>}
-        </div>
+        {!reports.length ? (
+          <div className="muted small">{t("object.noActivity")}</div>
+        ) : (
+          <div className="reports-feed">
+            {reports.slice(0, 12).map((row) => (
+              <ReportEntry key={row.id} row={row} hideProject onOpen={onOpenReport} />
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );

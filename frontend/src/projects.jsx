@@ -14,10 +14,27 @@ import {
   fetchTools,
   fetchUsers,
   setProjectStatus,
+  updateProject,
 } from "./api";
+import { AssigneePicker, assigneeNames, projectAssignees } from "./assignees";
 import { useI18n } from "./i18n";
 
 const PALETTE = ["#2C5F2E", "#5B7DB1", "#F4A442", "#A66A8E", "#6E5B8A", "#7A8B5C", "#B85C5C", "#5C8B8B"];
+
+const ymd = (d) => {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+const parseDay = (s) => new Date(`${s}T12:00:00`);
+const addDays = (s, n) => {
+  const d = parseDay(s);
+  d.setDate(d.getDate() + n);
+  return ymd(d);
+};
+const diffDaysInclusive = (from, to) => {
+  if (!from || !to) return "";
+  return Math.round((parseDay(to) - parseDay(from)) / 86400000) + 1;
+};
 
 const STATUS_LABEL = {
   open: "projectStatus.open",
@@ -42,7 +59,8 @@ const ProjectForm = ({ users, onClose, onSave }) => {
     total_m2: "",
     start_date: "",
     end_date: "",
-    assigned_to_id: users[0]?.id || "",
+    planned_days: "",
+    assigned_to_ids: users[0]?.id ? [Number(users[0].id)] : [],
   });
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -56,7 +74,7 @@ const ProjectForm = ({ users, onClose, onSave }) => {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.name.trim() || !form.assigned_to_id) {
+    if (!form.name.trim() || !form.assigned_to_ids.length) {
       setErr(t("projects.fillRequired"));
       return;
     }
@@ -73,7 +91,8 @@ const ProjectForm = ({ users, onClose, onSave }) => {
         total_m2: form.total_m2 === "" ? null : Number(form.total_m2),
         start_date: form.start_date || null,
         end_date: form.end_date || null,
-        assigned_to_id: Number(form.assigned_to_id),
+        planned_days: form.planned_days === "" ? null : Number(form.planned_days),
+        assigned_to_ids: form.assigned_to_ids,
       });
     } catch (error) {
       setErr(error.message || t("common.saveFailed"));
@@ -97,20 +116,18 @@ const ProjectForm = ({ users, onClose, onSave }) => {
               <span className="field-label">{t("common.name")}</span>
               <input className="input" value={form.name} onChange={set("name")} />
             </label>
-            <div className="field-row two">
-              <label className="field">
-                <span className="field-label">{t("common.client")}</span>
-                <input className="input" value={form.client} onChange={set("client")} />
-              </label>
-              <label className="field">
-                <span className="field-label">{t("projects.assigneeField")}</span>
-                <select className="select" value={form.assigned_to_id} onChange={set("assigned_to_id")}>
-                  {users.map((u) => (
-                    <option key={u.id} value={u.id}>{u.name}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            <label className="field">
+              <span className="field-label">{t("common.client")}</span>
+              <input className="input" value={form.client} onChange={set("client")} />
+            </label>
+            <label className="field">
+              <span className="field-label">{t("projects.assigneeField")}</span>
+              <AssigneePicker
+                users={users}
+                value={form.assigned_to_ids}
+                onChange={(assigned_to_ids) => setForm((f) => ({ ...f, assigned_to_ids }))}
+              />
+            </label>
             <label className="field">
               <span className="field-label">{t("common.address")}</span>
               <input className="input" value={form.address} onChange={set("address")} />
@@ -150,13 +167,65 @@ const ProjectForm = ({ users, onClose, onSave }) => {
             <div className="field-row two">
               <label className="field">
                 <span className="field-label">{t("newObject.dateFrom")}</span>
-                <input className="input" type="date" value={form.start_date} onChange={set("start_date")} />
+                <input
+                  className="input"
+                  type="date"
+                  value={form.start_date}
+                  onChange={(e) => {
+                    const start_date = e.target.value;
+                    setForm((f) => {
+                      const next = { ...f, start_date };
+                      if (start_date && f.planned_days) next.end_date = addDays(start_date, Number(f.planned_days) - 1);
+                      else if (start_date && f.end_date) {
+                        const days = diffDaysInclusive(start_date, f.end_date);
+                        if (days >= 1) next.planned_days = days;
+                      }
+                      return next;
+                    });
+                  }}
+                />
               </label>
               <label className="field">
-                <span className="field-label">{t("newObject.plannedEnd")}</span>
-                <input className="input" type="date" value={form.end_date} onChange={set("end_date")} />
+                <span className="field-label">{t("newObject.plannedDays")}</span>
+                <input
+                  className="input mono"
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="5"
+                  value={form.planned_days}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setForm((f) => {
+                      if (raw === "") return { ...f, planned_days: "" };
+                      const planned_days = Math.max(1, parseInt(raw, 10) || 1);
+                      const next = { ...f, planned_days };
+                      if (f.start_date) next.end_date = addDays(f.start_date, planned_days - 1);
+                      return next;
+                    });
+                  }}
+                />
               </label>
             </div>
+            <label className="field">
+              <span className="field-label">{t("newObject.plannedEnd")}</span>
+              <input
+                className="input"
+                type="date"
+                value={form.end_date}
+                onChange={(e) => {
+                  const end_date = e.target.value;
+                  setForm((f) => {
+                    const next = { ...f, end_date };
+                    if (f.start_date && end_date) {
+                      const days = diffDaysInclusive(f.start_date, end_date);
+                      if (days >= 1) next.planned_days = days;
+                    }
+                    return next;
+                  });
+                }}
+              />
+            </label>
             <label className="field">
               <span className="field-label">{t("common.description")}</span>
               <textarea className="textarea" value={form.description} onChange={set("description")} rows={3} />
@@ -188,6 +257,8 @@ const ProjectDetail = ({ user, projectId, onBack, readOnly }) => {
   const [borrow, setBorrow] = useState({ tool: "", quantity: "" });
   const [spendBusy, setSpendBusy] = useState(false);
   const [expenseBusy, setExpenseBusy] = useState(false);
+  const [people, setPeople] = useState([]);
+  const [assigneeIds, setAssigneeIds] = useState([]);
   const isAdmin = user?.role === "ADMINISTRATORS";
   const closed = project?.status === "closed" || readOnly;
 
@@ -198,6 +269,7 @@ const ProjectDetail = ({ user, projectId, onBack, readOnly }) => {
       fetchTools(),
     ]);
     setProject(p);
+    setAssigneeIds(projectAssignees(p).map((person) => Number(person.id)));
     setMaterials(Array.isArray(mats) ? mats : []);
     setTools(Array.isArray(toolItems) ? toolItems : []);
   };
@@ -205,6 +277,13 @@ const ProjectDetail = ({ user, projectId, onBack, readOnly }) => {
   useEffect(() => {
     load().catch((e) => setErr(e.message));
   }, [projectId]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    fetchUsers()
+      .then((rows) => setPeople((rows || []).filter((u) => u.is_active !== false)))
+      .catch(() => setPeople([]));
+  }, [isAdmin]);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -273,7 +352,8 @@ const ProjectDetail = ({ user, projectId, onBack, readOnly }) => {
           <div className="page-eyebrow">{t("projects.projectNum", { id: project.id })}</div>
           <h1 className="page-title">{project.name}</h1>
           <p className="page-sub">
-            {project.client || t("common.dash")} · {project.address || t("projects.noAddress")} · {project.assigned_to?.name}
+            {project.client || t("common.dash")} · {project.address || t("projects.noAddress")}
+            {assigneeNames(project) ? ` · ${assigneeNames(project)}` : ""}
           </p>
         </div>
         <div className="page-actions">
@@ -300,7 +380,42 @@ const ProjectDetail = ({ user, projectId, onBack, readOnly }) => {
       </header>
 
       {err && <div className="login-err">{err}</div>}
+      {project.planned_days_exceeded && (
+        <div className="info-strip" style={{ marginBottom: 16 }}>
+          <Icon name="clock" size={14} />
+          <span>{t("object.overdueBanner", { planned: project.planned_days, elapsed: project.elapsed_days, overdue: project.overdue_days })}</span>
+        </div>
+      )}
       {project.description && <section className="card">{project.description}</section>}
+
+      <section className="card">
+        <div className="card-head">
+          <h2 className="card-title">{t("projects.assignees")}</h2>
+          {isAdmin && !closed && (
+            <button
+              className="btn btn-outline"
+              onClick={() => run(
+                () => updateProject(project.id, { assigned_to_ids: assigneeIds }),
+                t("projects.assigneesSaved")
+              )}
+            >
+              <Icon name="save" size={14} /> {t("common.save")}
+            </button>
+          )}
+        </div>
+        {isAdmin && !closed ? (
+          <AssigneePicker users={people} value={assigneeIds} onChange={setAssigneeIds} />
+        ) : (
+          <div className="assignee-pick">
+            {projectAssignees(project).length ? projectAssignees(project).map((person) => (
+              <span key={person.id} className="worker-chip on">
+                <span className="avatar xs">{person.initials || "?"}</span>
+                {person.name}
+              </span>
+            )) : <div className="muted small">{t("projects.noAssignees")}</div>}
+          </div>
+        )}
+      </section>
 
       <section className="kpis">
         <div className="kpi">
@@ -619,19 +734,29 @@ const ProjectsPage = ({ user }) => {
         <section className="card muted">{t("projects.empty")}</section>
       ) : (
         <section className="users-grid">
-          {items.map((p) => (
-            <div key={p.id} className="user-card" onClick={() => setSelected(p.id)}>
+          {items.map((p) => {
+            const people = projectAssignees(p);
+            return (
+            <div key={p.id} className={`user-card ${p.planned_days_exceeded ? "overdue" : ""}`} onClick={() => setSelected(p.id)}>
               <div className="user-card-head">
-                <div className="user-card-avatar">{(p.assigned_to?.initials) || "P"}</div>
+                <div className="user-card-avatar">{people[0]?.initials || "P"}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="user-card-name">{p.name}</div>
                   <div className="user-card-email">{p.client || p.address || "—"}</div>
                 </div>
                 <span className={`status ${statusClass(p.status)}`}>{t(STATUS_LABEL[p.status])}</span>
               </div>
-              <div className="muted small">{t("projects.assignee", { name: p.assigned_to?.name })}</div>
+              <div className="muted small">{t("projects.assignee", { name: assigneeNames(p, t("common.dash")) })}</div>
+              {p.planned_days ? (
+                <div className={`muted small ${p.planned_days_exceeded ? "overdue-note" : ""}`}>
+                  {p.planned_days_exceeded
+                    ? t("projects.plannedOverdue", { planned: p.planned_days, elapsed: p.elapsed_days, overdue: p.overdue_days })
+                    : t("projects.plannedDaysMeta", { n: p.planned_days })}
+                </div>
+              ) : null}
             </div>
-          ))}
+            );
+          })}
         </section>
       )}
 

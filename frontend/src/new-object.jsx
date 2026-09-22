@@ -1,11 +1,22 @@
 import { useEffect, useState } from "react";
 import Icon from "./icons";
-import { fetchSystems } from "./api";
+import { fetchSystems, fetchUsers } from "./api";
+import { AssigneePicker } from "./assignees";
 import { useI18n } from "./i18n";
 
 const ymd = (d) => {
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+const parseDay = (s) => new Date(`${s}T12:00:00`);
+const addDays = (s, n) => {
+  const d = parseDay(s);
+  d.setDate(d.getDate() + n);
+  return ymd(d);
+};
+const diffDaysInclusive = (from, to) => {
+  if (!from || !to) return "";
+  return Math.round((parseDay(to) - parseDay(from)) / 86400000) + 1;
 };
 const todayStr = () => ymd(new Date());
 const plusMonths = (n) => {
@@ -26,6 +37,9 @@ const NewObjectModal = ({ onClose, onSave, nextId, busy }) => {
   const [colorRal, setColorRal] = useState("");
   const [startDate, setStartDate] = useState(todayStr);
   const [endDate, setEndDate] = useState(() => plusMonths(1));
+  const [plannedDays, setPlannedDays] = useState(() => diffDaysInclusive(todayStr(), plusMonths(1)) || "");
+  const [users, setUsers] = useState([]);
+  const [assigneeIds, setAssigneeIds] = useState([]);
   const [overrides, setOverrides] = useState({});
   const [step, setStep] = useState(1);
   const [err, setErr] = useState("");
@@ -42,6 +56,15 @@ const NewObjectModal = ({ onClose, onSave, nextId, busy }) => {
       })
       .catch((error) => {
         if (!cancelled) setSystemsErr(error.message || t("api.loadSystems"));
+      });
+    fetchUsers()
+      .then((rows) => {
+        if (cancelled) return;
+        const people = (rows || []).filter((u) => u.is_active !== false);
+        setUsers(people);
+      })
+      .catch(() => {
+        if (!cancelled) setUsers([]);
       });
     return () => {
       cancelled = true;
@@ -103,6 +126,8 @@ const NewObjectModal = ({ onClose, onSave, nextId, busy }) => {
         total_m2: totalM2,
         start_date: startDate || null,
         end_date: endDate || null,
+        planned_days: plannedDays === "" ? null : Number(plannedDays),
+        assigned_to_ids: assigneeIds,
         tasks,
         materials: Object.values(grouped).map((m) => ({
           name: m.name,
@@ -148,11 +173,15 @@ const NewObjectModal = ({ onClose, onSave, nextId, busy }) => {
                   <span className="field-label">{t("common.client")}</span>
                   <input className="input" placeholder={t("newObject.clientPh")} value={client} onChange={e => setClient(e.target.value)} />
                 </label>
-                <label className="field">
-                  <span className="field-label">{t("common.address")}</span>
-                  <input className="input" placeholder={t("newObject.addressPh")} value={address} onChange={e => setAddress(e.target.value)} />
-                </label>
+              <label className="field">
+                <span className="field-label">{t("common.address")}</span>
+                <input className="input" placeholder={t("newObject.addressPh")} value={address} onChange={e => setAddress(e.target.value)} />
+              </label>
               </div>
+              <label className="field">
+                <span className="field-label">{t("projects.assigneeField")}</span>
+                <AssigneePicker users={users} value={assigneeIds} onChange={setAssigneeIds} />
+              </label>
 
               <label className="field">
                 <span className="field-label">{t("newObject.system")}</span>
@@ -169,22 +198,67 @@ const NewObjectModal = ({ onClose, onSave, nextId, busy }) => {
                 </div>
               </label>
 
-              <div className="field-row">
+              <div className="field-row three">
                 <label className="field">
                   <span className="field-label">{t("newObject.volume")}</span>
                   <input className="input mono" type="number" value={totalM2} onChange={e => setTotalM2(Math.max(0, +e.target.value || 0))} />
                 </label>
                 <label className="field">
                   <span className="field-label">{t("newObject.dateFrom")}</span>
-                  <input className="input" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+                  <input
+                    className="input"
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setStartDate(next);
+                      if (next && plannedDays) setEndDate(addDays(next, Number(plannedDays) - 1));
+                      else if (next && endDate) {
+                        const days = diffDaysInclusive(next, endDate);
+                        if (days >= 1) setPlannedDays(days);
+                      }
+                    }}
+                  />
                 </label>
                 <label className="field">
-                  <span className="field-label">{t("newObject.plannedEnd")}</span>
-                  <input className="input" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+                  <span className="field-label">{t("newObject.plannedDays")}</span>
+                  <input
+                    className="input mono"
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="5"
+                    value={plannedDays}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === "") {
+                        setPlannedDays("");
+                        return;
+                      }
+                      const n = Math.max(1, parseInt(raw, 10) || 1);
+                      setPlannedDays(n);
+                      if (startDate) setEndDate(addDays(startDate, n - 1));
+                    }}
+                  />
                 </label>
               </div>
-
               <div className="field-row two">
+                <label className="field">
+                  <span className="field-label">{t("newObject.plannedEnd")}</span>
+                  <input
+                    className="input"
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setEndDate(next);
+                      if (startDate && next) {
+                        const days = diffDaysInclusive(startDate, next);
+                        if (days >= 1) setPlannedDays(days);
+                      }
+                    }}
+                  />
+                </label>
                 <div className="field">
                   <span className="field-label">{t("newObject.calColor")}</span>
                   <div className="color-row">
@@ -193,13 +267,14 @@ const NewObjectModal = ({ onClose, onSave, nextId, busy }) => {
                     ))}
                   </div>
                 </div>
-                {sys?.needsColor && (
-                  <label className="field">
-                    <span className="field-label">{t("newObject.ral")}</span>
-                    <input className="input" placeholder="RAL7001, RAL7035..." value={colorRal} onChange={e => setColorRal(e.target.value)} />
-                  </label>
-                )}
               </div>
+
+              {sys?.needsColor && (
+                <label className="field">
+                  <span className="field-label">{t("newObject.ral")}</span>
+                  <input className="input" placeholder="RAL7001, RAL7035..." value={colorRal} onChange={e => setColorRal(e.target.value)} />
+                </label>
+              )}
 
               <div className="info-strip">
                 <Icon name="alert" size={14} />

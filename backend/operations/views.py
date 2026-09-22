@@ -56,6 +56,11 @@ from .serializers import (
 )
 
 
+def assignee_label(project):
+    names = [person.name for person in project.assignees.all() if person and person.name]
+    return ", ".join(names) if names else "—"
+
+
 def is_admin(user):
     return bool(
         user
@@ -215,18 +220,25 @@ class MaterialViewSet(
     mixins.UpdateModelMixin,
     viewsets.GenericViewSet,
 ):
-    queryset = Material.objects.select_related("warehouse", "created_by")
+    queryset = Material.objects.select_related("warehouse", "created_by").prefetch_related(
+        "project_needs__project"
+    )
     serializer_class = MaterialSerializer
     permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
         material = serializer.save(created_by=self.request.user)
+        links = list(material.project_needs.select_related("project"))
+        extra = ""
+        if links:
+            names = ", ".join(f"«{row.project.name}»" for row in links)
+            extra = f", piesaistīts {names}"
         log_activity(
             self.request.user,
             "created",
             "material",
             material.id,
-            f"Izveidots materiāls «{material}» noliktavā {material.warehouse.name}",
+            f"Izveidots materiāls «{material}» noliktavā {material.warehouse.name}{extra}",
         )
 
     def perform_update(self, serializer):
@@ -341,8 +353,9 @@ class ProjectViewSet(
 
     def get_queryset(self):
         qs = Project.objects.select_related(
-            "assigned_to", "created_by", "closed_by"
+            "created_by", "closed_by"
         ).prefetch_related(
+            "assignees",
             "needed_materials__material__warehouse",
             "borrowed_tools__tool__tool_type",
             "borrowed_tools__tool__warehouse",
@@ -370,20 +383,19 @@ class ProjectViewSet(
         client = (serializer.validated_data.get("client") or "").strip()
         if not name:
             serializer.validated_data["name"] = client or "Objekts"
-        assigned = serializer.validated_data.get("assigned_to") or user
+        if not serializer.validated_data.get("assignees"):
+            serializer.validated_data["assignees"] = [user]
         project = serializer.save(
             created_by=user,
-            assigned_to=assigned,
             status=Project.Status.OPEN,
         )
         apply_project_blueprint(project, user, tasks_payload, materials_payload)
-        assignee = project.assigned_to.name if project.assigned_to_id else "—"
         log_activity(
             user,
             "created",
             "project",
             project.id,
-            f"Izveidots objekts «{project.name}», piešķirts {assignee}",
+            f"Izveidots objekts «{project.name}», piešķirts {assignee_label(project)}",
         )
 
     def perform_update(self, serializer):
@@ -391,6 +403,8 @@ class ProjectViewSet(
             raise ValidationError({"detail": "Arhivētu objektu nevar labot."})
         if not self._can_work(serializer.instance):
             raise ValidationError({"detail": "Nav piekļuves šim projektam."})
+        if not is_admin(self.request.user):
+            serializer.validated_data.pop("assignees", None)
         serializer.validated_data.pop("tasks", None)
         serializer.validated_data.pop("materials", None)
         project = serializer.save()
@@ -847,10 +861,9 @@ class JobViewSet(
     def get_queryset(self):
         qs = Job.objects.select_related(
             "project",
-            "project__assigned_to",
             "assigned_to",
             "created_by",
-        )
+        ).prefetch_related("project__assignees")
         assigned = self.request.query_params.get("assigned_to")
         project = self.request.query_params.get("project")
         if assigned:
@@ -968,6 +981,7 @@ class DailyReportViewSet(
     mixins.ListModelMixin,
     mixins.CreateModelMixin,
     mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
     mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
@@ -985,12 +999,18 @@ class DailyReportViewSet(
         project = self.request.query_params.get("project")
         work_date = self.request.query_params.get("date")
         recorded = self.request.query_params.get("recorded_by")
+        from_s = self.request.query_params.get("from")
+        to_s = self.request.query_params.get("to")
         if project:
             qs = qs.filter(project_id=project)
         if work_date:
             qs = qs.filter(work_date=work_date)
         if recorded:
             qs = qs.filter(recorded_by_id=recorded)
+        if from_s:
+            qs = qs.filter(work_date__gte=from_s)
+        if to_s:
+            qs = qs.filter(work_date__lte=to_s)
         if not is_admin(user):
             qs = qs.filter(recorded_by=user)
         return qs
@@ -1022,11 +1042,54 @@ class DailyReportViewSet(
         log_activity(
             request.user,
             "report_saved",
-            "project",
-            project.id,
+            "report",
+            report.id,
             f"Atskaite {work_date} · «{project.name}»",
         )
         return Response(DailyReportSerializer(report).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        report = self.get_object()
+        user = request.user
+        if not is_admin(user) and report.recorded_by_id != user.id:
+            return Response({"detail": "Nav piekļuves šai atskaitei."}, status=status.HTTP_403_FORBIDDEN)
+        if not is_admin(user) and is_archived(report.project):
+            return Response({"detail": "Arhivētu objektu nevar mainīt."}, status=400)
+        notes = request.data.get("notes", report.notes)
+        if notes is None:
+            notes = ""
+        task_payload = request.data.get("task_lines")
+        material_payload = request.data.get("material_lines")
+        try:
+            with transaction.atomic():
+                report.notes = notes
+                report.save(update_fields=["notes", "updated_at"])
+                if task_payload is not None or material_payload is not None:
+                    current_tasks = [
+                        {"task": line.task_id, "quantity": line.quantity}
+                        for line in report.task_lines.all()
+                    ]
+                    current_mats = [
+                        {"material": line.material_id, "quantity": line.quantity}
+                        for line in report.material_lines.all()
+                    ]
+                    save_report_lines(
+                        report,
+                        task_payload if task_payload is not None else current_tasks,
+                        material_payload if material_payload is not None else current_mats,
+                        user,
+                    )
+        except ValidationError as exc:
+            return Response(exc.detail, status=400)
+        report = self.get_queryset().get(pk=report.pk)
+        log_activity(
+            user,
+            "report_saved",
+            "report",
+            report.id,
+            f"Atskaite {report.work_date} · «{report.project.name}»",
+        )
+        return Response(DailyReportSerializer(report).data)
 
     def perform_destroy(self, instance):
         user = self.request.user
@@ -1106,6 +1169,46 @@ def reverse_report_materials(report, user):
             apply_material_spending(report.project, line.material, -line.quantity, user)
 
 
+def overdue_schedule_items(user):
+    qs = (
+        Project.objects.exclude(status__in=Project.ARCHIVED_STATUSES)
+        .filter(planned_days__isnull=False)
+        .prefetch_related("assignees")
+    )
+    if not is_admin(user):
+        qs = qs.filter(assignees=user)
+    items = []
+    for project in qs:
+        overdue = project.overdue_days()
+        if overdue <= 0:
+            continue
+        elapsed = project.elapsed_days() or 0
+        since = project.overdue_since() or project.updated_at or timezone.now()
+        items.append(
+            {
+                "id": f"overdue-{project.id}",
+                "kind": "info",
+                "icon": "clock",
+                "code": "planned_days_exceeded",
+                "title": f"Pārsniegts plānotais termiņš: {project.name}",
+                "sub": (
+                    f"Informācija · #{project.id} · plānotas {project.planned_days} d., "
+                    f"pagājušas {elapsed} d."
+                ),
+                "created_at": since.isoformat(),
+                "unread": True,
+                "source": "schedule",
+                "project_id": project.id,
+                "project_name": project.name,
+                "planned_days": project.planned_days,
+                "elapsed_days": elapsed,
+                "overdue_days": overdue,
+            }
+        )
+    items.sort(key=lambda row: row["created_at"], reverse=True)
+    return items
+
+
 class NotificationsViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = ActivityLogSerializer
@@ -1128,6 +1231,8 @@ class NotificationsViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     "created_at": log.created_at.isoformat(),
                     "unread": True,
                     "source": "activity",
+                    "action": log.action,
+                    **notif_entity_refs(log),
                 }
             )
         if is_admin(user):
@@ -1146,11 +1251,41 @@ class NotificationsViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                         "created_at": check.updated_at.isoformat(),
                         "unread": True,
                         "source": "tool",
+                        "project_id": check.project_id,
                     }
                 )
         items.sort(key=lambda row: row["created_at"], reverse=True)
-        clipped = items[:24]
+        merged = overdue_schedule_items(user) + items
+        clipped = merged[:24]
         return Response({"items": clipped, "unread": len(clipped)})
+
+
+def notif_entity_refs(log):
+    refs = {
+        "entity_type": log.entity_type,
+        "entity_id": log.entity_id,
+    }
+    if log.entity_type == "project":
+        refs["project_id"] = log.entity_id
+    if log.action != "report_saved":
+        return refs
+    if log.entity_type == "report":
+        refs["report_id"] = log.entity_id
+        return refs
+    if log.entity_type == "project" and log.user_id:
+        day = timezone.localtime(log.created_at).date()
+        found = (
+            DailyReport.objects.filter(
+                project_id=log.entity_id,
+                recorded_by_id=log.user_id,
+                work_date=day,
+            )
+            .order_by("-updated_at")
+            .first()
+        )
+        if found:
+            refs["report_id"] = found.id
+    return refs
 
 
 def notif_style(action):

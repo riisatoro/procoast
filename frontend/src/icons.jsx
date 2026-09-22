@@ -39,6 +39,7 @@ const Icon = ({ name, size = 18, stroke = 1.75, ...rest }) => {
     calendarPlus: <><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18M12 14v6M9 17h6" /></>,
     archive: <><rect x="2" y="4" width="20" height="5" rx="1" /><path d="M4 9v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9" /><path d="M10 13h4" /></>,
     folder: <path d="M4 4h5l2 3h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />,
+    warehouse: <><path d="M3 21V9l9-6 9 6v12" /><path d="M3 21h18" /><path d="M9 21v-8h6v8" /><path d="M9 9h.01M15 9h.01" /></>,
   };
   return <svg {...common}>{paths[name] || null}</svg>;
 };

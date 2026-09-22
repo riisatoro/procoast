@@ -4,6 +4,8 @@ import PeriodPicker, { formatPeriod } from "./period-picker";
 import { closeProject, discardProject, fetchDashboardStats } from "./api";
 import { OBJECT_STATUS_LABEL, objectStatusClass, objectUiStatus } from "./object-status";
 import { useI18n } from "./i18n";
+import CsvExportMenu from "./csv-export";
+import ReportEntry from "./report-entry";
 
 const PALETTE = ["#2C5F2E", "#5B7DB1", "#F4A442", "#A66A8E", "#6E5B8A", "#7A8B5C", "#B85C5C", "#5C8B8B"];
 
@@ -22,7 +24,7 @@ const qty = (v, locale) => {
   return n.toLocaleString(locale, { maximumFractionDigits: 2 });
 };
 
-const Dashboard = ({ user, onNavigate, onSelectObject }) => {
+const Dashboard = ({ user, onNavigate, onSelectObject, onOpenReport }) => {
   const { t, dateLocale } = useI18n();
   const [period, setPeriod] = useState(currentMonth);
   const [stats, setStats] = useState(null);
@@ -54,6 +56,7 @@ const Dashboard = ({ user, onNavigate, onSelectObject }) => {
   const items = projects.items || [];
   const materials = stats?.material_usage || [];
   const todayReports = stats?.today_reports?.length ? stats.today_reports : stats?.today_jobs || [];
+  const todayAreReports = Boolean(stats?.today_reports?.length);
   const monthDelta = Number(periodStats.done_m2_delta || 0);
 
   const completeObject = async (p) => {
@@ -94,6 +97,7 @@ const Dashboard = ({ user, onNavigate, onSelectObject }) => {
         </div>
         <div className="page-actions">
           <PeriodPicker value={period} onChange={setPeriod} />
+          <CsvExportMenu from={period.from} to={period.to} />
           <button className="btn btn-primary" onClick={() => onNavigate("calendar")}>
             <Icon name="calendarPlus" size={15} /> {t("dashboard.newEntry")}
           </button>
@@ -161,7 +165,7 @@ const Dashboard = ({ user, onNavigate, onSelectObject }) => {
                 const label = p.client || p.name;
                 const color = p.color || PALETTE[p.id % PALETTE.length];
                 return (
-                  <div key={p.id} className="obj-row">
+                  <div key={p.id} className={`obj-row ${p.planned_days_exceeded ? "overdue" : ""}`}>
                     <div className="obj-row-head">
                       <span className="obj-dot" style={{ background: color }} />
                       <span className="obj-id mono">#{p.id}</span>
@@ -173,6 +177,11 @@ const Dashboard = ({ user, onNavigate, onSelectObject }) => {
                       >
                         {label}
                       </button>
+                      {p.planned_days_exceeded && (
+                        <span className="notif-info-pill" title={t("object.overdueBanner", { planned: p.planned_days, elapsed: p.elapsed_days, overdue: p.overdue_days })}>
+                          {t("notif.info")}
+                        </span>
+                      )}
                       <span className={objectStatusClass(p.status)}>{t(OBJECT_STATUS_LABEL[ui])}</span>
                       <span className="obj-pct mono">{pct}%</span>
                       {isAdmin && ui !== "completed" && (
@@ -222,23 +231,12 @@ const Dashboard = ({ user, onNavigate, onSelectObject }) => {
           ) : (
             <div className="reports-feed">
               {todayReports.map((row) => (
-                <div key={row.id} className="feed-row">
-                  <div className="avatar sm">{row.worker || row.initials || "?"}</div>
-                  <div className="feed-body">
-                    <div className="feed-line">
-                      <strong>{row.worker_name || row.assigned_to || row.worker}</strong>
-                      <span className="muted">·</span>
-                      {row.object_id || row.project_id ? <span className="mono small">#{row.object_id || row.project_id}</span> : null}
-                      <span>{row.client || row.project}</span>
-                    </div>
-                    <div className="feed-sub">{row.summary || t("common.dash")}</div>
-                  </div>
-                  <div className="feed-time mono">
-                    {row.created_at || row.starts_at
-                      ? new Date(row.created_at || row.starts_at).toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" })
-                      : ""}
-                  </div>
-                </div>
+                <ReportEntry
+                  key={row.id}
+                  row={row}
+                  onSelectProject={onSelectObject}
+                  onOpen={todayAreReports ? onOpenReport : undefined}
+                />
               ))}
             </div>
           )}

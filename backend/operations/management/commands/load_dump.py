@@ -249,9 +249,19 @@ class Command(BaseCommand):
             key = (row.get("seed_key") or "").strip()
             if not key:
                 continue
-            assignee = users.get(row.get("assigned_to") or "")
+            assignee_keys = row.get("assigned_to")
+            if isinstance(assignee_keys, str) or assignee_keys is None:
+                assignee_keys = [assignee_keys] if assignee_keys else []
+            assignees = [users[key] for key in assignee_keys if key in users]
             status = row.get("status") or Project.Status.OPEN
             closed_at = parse_dt(row.get("closed_at"))
+            start_date = parse_date(str(row.get("start_date") or "")) if row.get("start_date") else None
+            end_date = parse_date(str(row.get("end_date") or "")) if row.get("end_date") else None
+            planned_days = int(row["planned_days"]) if row.get("planned_days") not in (None, "") else None
+            if planned_days is None and start_date and end_date:
+                planned_days = (end_date - start_date).days + 1
+                if planned_days < 1:
+                    planned_days = None
             project, _ = Project.objects.update_or_create(
                 seed_key=key,
                 defaults={
@@ -262,9 +272,9 @@ class Command(BaseCommand):
                     "status": status,
                     "color": row.get("color") or "#2C5F2E",
                     "total_m2": dec(row.get("total_m2")) if row.get("total_m2") not in (None, "") else None,
-                    "start_date": parse_date(str(row.get("start_date") or "")) if row.get("start_date") else None,
-                    "end_date": parse_date(str(row.get("end_date") or "")) if row.get("end_date") else None,
-                    "assigned_to": assignee,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "planned_days": planned_days,
                     "created_by": actor,
                     "closed_at": closed_at if status == Project.Status.CLOSED else None,
                     "closed_by": actor if status == Project.Status.CLOSED else None,
@@ -306,6 +316,8 @@ class Command(BaseCommand):
                             recorded_by=actor,
                         )
             projects[key] = project
+            if assignees:
+                project.assignees.set(assignees)
         return projects
 
     def load_jobs(self, rows, projects, users):
@@ -325,6 +337,7 @@ class Command(BaseCommand):
                     "created_by": actor,
                 },
             )
+            project.assignees.add(person)
 
     def load_reports(self, rows, projects, users):
         for row in rows:

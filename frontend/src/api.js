@@ -202,8 +202,11 @@ export const fetchReports = (params = {}) => {
   ).toString();
   return jsonCall(`/api/reports/${query ? `?${query}` : ""}`, {}, t("api.loadReports"));
 };
+export const fetchReport = (id) => jsonCall(`/api/reports/${id}/`, {}, t("api.loadReport"));
 export const saveReport = (payload) =>
   jsonCall("/api/reports/", { method: "POST", body: JSON.stringify(payload) }, t("api.saveReport"));
+export const updateReport = (id, payload) =>
+  jsonCall(`/api/reports/${id}/`, { method: "PATCH", body: JSON.stringify(payload) }, t("api.saveReport"));
 export const deleteReport = (id) =>
   jsonCall(`/api/reports/${id}/`, { method: "DELETE" }, t("api.deleteReport"));
 export const fetchNotifications = () => jsonCall("/api/notifications/", {}, t("api.loadNotif"));
@@ -248,3 +251,38 @@ export const saveCalendarSettings = (payload) =>
     { method: "PUT", body: JSON.stringify(payload) },
     t("api.saveCalendarSettings")
   );
+
+function filenameFromDisposition(header, fallback) {
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(header || "");
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1]);
+    } catch {
+      return star[1];
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(header || "");
+  return plain?.[1] || fallback;
+}
+
+export async function downloadExportCsv({ type, from, to, user, lang }) {
+  const query = new URLSearchParams(
+    Object.fromEntries(
+      Object.entries({ type, from, to, user, lang }).filter(([, v]) => v != null && v !== "")
+    )
+  ).toString();
+  const res = await api(`/api/exports/csv/${query ? `?${query}` : ""}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(errorFromResponse(data, t("api.exportCsv")));
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filenameFromDisposition(res.headers.get("Content-Disposition"), `procoast-${type}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}

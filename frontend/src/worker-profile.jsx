@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import Icon from "./icons";
-import { fetchActivity, fetchCalendarSettings, fetchJobs, fetchProjects, fetchUsers } from "./api";
+import { fetchCalendarSettings, fetchJobs, fetchProjects, fetchReports, fetchUsers } from "./api";
+import { isAssignedTo } from "./assignees";
 import { DEFAULT_CAL_SETTINGS, settingsFromApi, workHoursLength, ymd } from "./cal-settings";
 import { STATUS_LABEL, statusClass } from "./projects";
 import { useI18n } from "./i18n";
+import CsvExportMenu from "./csv-export";
+import ReportEntry from "./report-entry";
 
 const mondayOf = (d) => {
   const date = new Date(d);
@@ -37,12 +40,12 @@ const hoursOnDay = (job, dateStr, defaultH, workStart = "08:00", workEnd = "17:0
   return defaultH;
 };
 
-const WorkerProfile = ({ user, profileUserId, onBack, onSelectObject }) => {
-  const { t, dateLocale } = useI18n();
+const WorkerProfile = ({ user, profileUserId, onBack, onSelectObject, onOpenReport }) => {
+  const { t } = useI18n();
   const isAdmin = user.role === "ADMINISTRATORS";
   const [period, setPeriod] = useState("week");
   const [target, setTarget] = useState(user);
-  const [logs, setLogs] = useState([]);
+  const [reports, setReports] = useState([]);
   const [assigned, setAssigned] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_CAL_SETTINGS);
@@ -67,20 +70,20 @@ const WorkerProfile = ({ user, profileUserId, onBack, onSelectObject }) => {
       if (cancelled) return;
       setTarget(next);
       try {
-        const [acts, projects, jobRows, cal] = await Promise.all([
-          fetchActivity(next.id),
+        const [projects, jobRows, cal, reportRows] = await Promise.all([
           fetchProjects(),
           fetchJobs({ assigned_to: next.id }),
           fetchCalendarSettings().catch(() => null),
+          fetchReports({ recorded_by: next.id }).catch(() => []),
         ]);
         if (cancelled) return;
-        setLogs(Array.isArray(acts) ? acts : []);
-        setAssigned((Array.isArray(projects) ? projects : []).filter((p) => p.assigned_to?.id === next.id));
+        setReports(Array.isArray(reportRows) ? reportRows : []);
+        setAssigned((Array.isArray(projects) ? projects : []).filter((p) => isAssignedTo(p, next.id)));
         setJobs(Array.isArray(jobRows) ? jobRows : []);
         if (cal) setSettings(settingsFromApi(cal));
       } catch {
         if (!cancelled) {
-          setLogs([]);
+          setReports([]);
           setAssigned([]);
           setJobs([]);
         }
@@ -139,6 +142,16 @@ const WorkerProfile = ({ user, profileUserId, onBack, onSelectObject }) => {
   const workedDays = weekDays.filter((d) => d.hours > 0).length;
   const avgDay = (totalWeek / Math.max(1, workedDays)).toFixed(1);
 
+  const exportRange = useMemo(() => {
+    if (period === "week") {
+      const end = new Date(weekStart);
+      end.setDate(weekStart.getDate() + 6);
+      return { from: ymd(weekStart), to: ymd(end) };
+    }
+    if (period === "year") return { from: yearStart, to: yearEnd };
+    return { from: monthStart, to: monthEnd };
+  }, [period, weekStart, monthStart, monthEnd, yearStart, yearEnd]);
+
   return (
     <div className="page">
       <header className="page-head">
@@ -170,6 +183,7 @@ const WorkerProfile = ({ user, profileUserId, onBack, onSelectObject }) => {
           </div>
         </div>
         <div className="page-actions">
+          <CsvExportMenu from={exportRange.from} to={exportRange.to} userId={target.id} />
           {isAdmin && !isSelf && (
             <>
               <button className="btn btn-ghost"><Icon name="edit" size={15} /> {t("common.edit")}</button>
@@ -237,23 +251,24 @@ const WorkerProfile = ({ user, profileUserId, onBack, onSelectObject }) => {
       <div className="grid-2">
         <section className="card">
           <div className="card-head">
-            <h2 className="card-title">{t("profile.activity")}</h2>
-            <span className="badge">{logs.length}</span>
+            <h2 className="card-title">{t("entry.title")}</h2>
+            <span className="badge">{reports.length}</span>
           </div>
-          <div className="activity-list">
-            {logs.length === 0 && (
-              <div className="muted small ta-c" style={{ padding: 20 }}>{t("profile.noLogs")}</div>
-            )}
-            {logs.map((a) => (
-              <div key={a.id} className="activity-row">
-                <div className="activity-date">{new Date(a.created_at).toLocaleString(dateLocale)}</div>
-                <div>
-                  <div className="activity-title">{a.summary}</div>
-                  <div className="activity-sub">{a.entity_type} · {a.action}</div>
-                </div>
-              </div>
-            ))}
-          </div>
+          {!reports.length ? (
+            <div className="muted small ta-c" style={{ padding: 20 }}>{t("entry.none")}</div>
+          ) : (
+            <div className="reports-feed">
+              {reports.map((row) => (
+                <ReportEntry
+                  key={row.id}
+                  row={row}
+                  hidePerson
+                  onSelectProject={onSelectObject}
+                  onOpen={onOpenReport}
+                />
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="card">

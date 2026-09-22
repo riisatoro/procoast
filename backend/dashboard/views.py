@@ -212,8 +212,8 @@ class DashboardStatsView(APIView):
         ever_m2 = Decimal("0")
         for project in (
             Project.objects.exclude(status=Project.Status.DELETED)
-            .select_related("assigned_to")
             .prefetch_related(
+                "assignees",
                 "needed_materials",
                 "spendings",
                 "expenses",
@@ -241,7 +241,7 @@ class DashboardStatsView(APIView):
             ever_m2 += volume
             mat_pct = int((spent / needed * 100).quantize(Decimal("1"))) if needed else 0
             progress_pct = int((finished / volume * 100).quantize(Decimal("1"))) if volume else 0
-            assignee = project.assigned_to
+            people = list(project.assignees.all())
             projects.append(
                 {
                     "id": project.id,
@@ -254,13 +254,18 @@ class DashboardStatsView(APIView):
                     "total_m2": _dec(volume),
                     "done_m2": _dec(finished),
                     "progress_pct": min(100, max(0, progress_pct)),
-                    "assigned_to": {
-                        "id": assignee.id,
-                        "name": assignee.name,
-                        "initials": assignee.initials,
-                    }
-                    if assignee
-                    else None,
+                    "planned_days": project.planned_days,
+                    "elapsed_days": project.elapsed_days(),
+                    "planned_days_exceeded": project.is_planned_overdue(),
+                    "overdue_days": project.overdue_days() or None,
+                    "assigned_to": [
+                        {
+                            "id": person.id,
+                            "name": person.name,
+                            "initials": person.initials,
+                        }
+                        for person in people
+                    ],
                     "expenses_total": _dec(expenses),
                     "materials_needed": len(need_rows),
                     "material_pct": min(100, max(0, mat_pct)),
@@ -321,10 +326,38 @@ class DashboardStatsView(APIView):
                     "id": report.id,
                     "object_id": report.project_id,
                     "client": report.project.client or report.project.name,
+                    "project_name": report.project.name,
+                    "address": report.project.address,
+                    "system": report.project.system,
+                    "color": report.project.color,
                     "worker": person.initials if person else "",
                     "worker_name": person.name if person else "",
+                    "notes": report.notes or "",
+                    "work_date": report.work_date.isoformat(),
+                    "tasks": [
+                        {
+                            "id": line.id,
+                            "name": line.task.name if line.task_id else "",
+                            "quantity": str(line.quantity),
+                            "unit": line.task.unit if line.task_id else "m²",
+                        }
+                        for line in report.task_lines.all()
+                        if line.quantity
+                    ],
+                    "materials": [
+                        {
+                            "id": line.id,
+                            "name": line.material.name,
+                            "color": line.material.color or "",
+                            "quantity": str(line.quantity),
+                            "unit": line.material.unit,
+                        }
+                        for line in report.material_lines.all()
+                        if line.quantity
+                    ],
                     "summary": ", ".join(parts[:4]),
                     "created_at": report.created_at.isoformat(),
+                    "updated_at": report.updated_at.isoformat() if report.updated_at else None,
                 }
             )
 

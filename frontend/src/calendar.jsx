@@ -13,9 +13,16 @@ import {
   ymd,
 } from "./cal-settings";
 import { createJob, fetchCalendarSettings, fetchJobs, fetchProjects, fetchUsers, saveCalendarSettings } from "./api";
+import { assigneeNames } from "./assignees";
 import { useI18n } from "./i18n";
 
 const PALETTE = ["#2C5F2E", "#5B7DB1", "#F4A442", "#A66A8E", "#6E5B8A", "#7A8B5C", "#B85C5C", "#5C8B8B"];
+const WORKER_PALETTE = [
+  "#2C5F2E", "#3D6BA5", "#C45C26", "#6E5B8A", "#1D6A7A",
+  "#A63D40", "#3F6F3A", "#B8860B", "#4A6FA5", "#8B4513",
+  "#1F7A6C", "#C45C5C", "#264653", "#7B4B94", "#1D7A9C",
+  "#8A3B2B",
+];
 
 const hashHue = (s) => {
   let h = 0;
@@ -23,10 +30,57 @@ const hashHue = (s) => {
   return PALETTE[h % PALETTE.length];
 };
 
-const jobColor = (job, colorBy) => {
-  if (colorBy === "worker") return PALETTE[(job.assigned_to?.id || 0) % PALETTE.length];
-  if (colorBy === "system") return hashHue(job.project?.system || job.project?.name);
-  return job.project?.color || PALETTE[(job.project?.id || job.id) % PALETTE.length];
+const projectColor = (project, fallbackId) =>
+  project?.color || PALETTE[(project?.id || fallbackId || 0) % PALETTE.length];
+
+const buildWorkerColors = (users, jobs) => {
+  const people = new Map();
+  (users || []).forEach((person) => people.set(Number(person.id), person));
+  (jobs || []).forEach((job) => {
+    const person = job.assigned_to;
+    if (person?.id && !people.has(Number(person.id))) people.set(Number(person.id), person);
+  });
+  const sorted = [...people.values()].sort((a, b) => Number(a.id) - Number(b.id));
+  const map = new Map();
+  sorted.forEach((person, index) => {
+    map.set(Number(person.id), WORKER_PALETTE[index % WORKER_PALETTE.length]);
+  });
+  return map;
+};
+
+const groupJobsByProject = (dayJobs) => {
+  const groups = new Map();
+  dayJobs.forEach((job) => {
+    const pid = job.project?.id || `job-${job.id}`;
+    if (!groups.has(pid)) {
+      groups.set(pid, {
+        key: String(pid),
+        project: job.project,
+        jobs: [],
+        workers: [],
+      });
+    }
+    const group = groups.get(pid);
+    group.jobs.push(job);
+    const worker = job.assigned_to;
+    if (worker?.id && !group.workers.some((person) => Number(person.id) === Number(worker.id))) {
+      group.workers.push(worker);
+    }
+  });
+  return [...groups.values()];
+};
+
+const groupTimeLabel = (group, locale) => {
+  const starts = group.jobs.map((job) => new Date(job.starts_at)).sort((a, b) => a - b);
+  const ends = group.jobs
+    .map((job) => (job.ends_at ? new Date(job.ends_at) : null))
+    .filter(Boolean)
+    .sort((a, b) => a - b);
+  if (!starts.length) return "";
+  const start = starts[0].toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+  if (!ends.length) return start;
+  const end = ends[ends.length - 1].toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+  return `${start}–${end}`;
 };
 
 const jobDay = (iso) => ymd(new Date(iso));
@@ -35,14 +89,6 @@ const jobCovers = (job, ds) => {
   const start = jobDay(job.starts_at);
   const end = job.ends_at ? jobDay(job.ends_at) : start;
   return ds >= start && ds <= end;
-};
-
-const formatTime = (iso, locale) =>
-  new Date(iso).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
-
-const formatWhen = (iso, locale) => {
-  const d = new Date(iso);
-  return `${ymd(d)} ${d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}`;
 };
 
 const buildMonthGrid = (year, month, firstDay) => {
@@ -77,8 +123,8 @@ const CalendarView = ({ user, onSelectObject }) => {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [toast, setToast] = useState("");
-  const [filterBy, setFilterBy] = useState("workers");
-  const [filterId, setFilterId] = useState(user.id);
+  const [projectFilter, setProjectFilter] = useState("all");
+  const [workerFilter, setWorkerFilter] = useState(isAdmin ? "all" : user.id);
 
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
@@ -109,61 +155,84 @@ const CalendarView = ({ user, onSelectObject }) => {
       .finally(() => setLoading(false));
   }, []);
 
-  const visibleJobs = useMemo(() => {
-    if (filterBy === "workers") {
-      if (filterId === "all") return jobs;
-      return jobs.filter((j) => String(j.assigned_to?.id) === String(filterId));
-    }
-    if (filterId === "all") return jobs;
-    return jobs.filter((j) => String(j.id) === String(filterId));
-  }, [jobs, filterBy, filterId]);
+  const workerColors = useMemo(() => buildWorkerColors(users, jobs), [users, jobs]);
+  const colorForWorker = (id) => workerColors.get(Number(id)) || WORKER_PALETTE[0];
 
-  const jobsOn = (d) => visibleJobs.filter((j) => jobCovers(j, ymd(d)));
+  const visibleJobs = useMemo(() => {
+    return jobs.filter((job) => {
+      if (projectFilter !== "all" && String(job.project?.id) !== String(projectFilter)) return false;
+      if (workerFilter !== "all" && String(job.assigned_to?.id) !== String(workerFilter)) return false;
+      return true;
+    });
+  }, [jobs, projectFilter, workerFilter]);
+
+  const groupsOn = (d) => groupJobsByProject(visibleJobs.filter((job) => jobCovers(job, ymd(d))));
+
+  const groupColor = (group) => {
+    if (settings.colorBy === "worker" && group.workers.length === 1) {
+      return colorForWorker(group.workers[0].id);
+    }
+    if (settings.colorBy === "system") {
+      return hashHue(group.project?.system || group.project?.name);
+    }
+    return projectColor(group.project, group.jobs[0]?.id);
+  };
 
   const workerOptions = useMemo(() => {
     const people = users.length ? users : [user];
     return [
       { id: "all", label: t("calendar.allWorkers") },
-      ...people.map((u) => ({
-        id: u.id,
-        label: u.name,
-        sub: u.initials,
+      ...people.map((person) => ({
+        id: person.id,
+        label: person.name,
+        sub: person.initials,
       })),
     ];
   }, [users, user, t]);
 
-  const jobOptions = useMemo(
+  const projectOptions = useMemo(
     () => [
-      { id: "all", label: t("calendar.allJobs") },
-      ...jobs.map((j) => ({
-        id: j.id,
-        label: j.project?.name || `#${j.id}`,
-        sub: `${formatWhen(j.starts_at, dateLocale)} · ${j.assigned_to?.initials || ""}`,
+      { id: "all", label: t("calendar.allProjects") },
+      ...projects.map((project) => ({
+        id: project.id,
+        label: project.name,
+        sub: [project.client, assigneeNames(project)].filter(Boolean).join(" · "),
       })),
     ],
-    [jobs, t, dateLocale]
+    [projects, t]
   );
 
   const legend = useMemo(() => {
-    const seen = new Map();
-    visibleJobs.forEach((j) => {
-      if (settings.colorBy === "worker") {
-        const id = j.assigned_to?.id;
-        if (id && !seen.has(`w-${id}`)) seen.set(`w-${id}`, { key: `w-${id}`, label: j.assigned_to.name, job: j });
-      } else if (settings.colorBy === "system") {
-        const sys = j.project?.system || j.project?.name;
-        if (sys && !seen.has(`s-${sys}`)) seen.set(`s-${sys}`, { key: `s-${sys}`, label: sys, job: j });
-      } else if (j.project && !seen.has(`p-${j.project.id}`)) {
-        seen.set(`p-${j.project.id}`, { key: `p-${j.project.id}`, label: j.project.name, job: j });
+    const projectsSeen = [];
+    const workersSeen = [];
+    const seenP = new Set();
+    const seenW = new Set();
+    visibleJobs.forEach((job) => {
+      const project = job.project;
+      if (project?.id && !seenP.has(project.id)) {
+        seenP.add(project.id);
+        projectsSeen.push({
+          key: `p-${project.id}`,
+          label: project.name,
+          color: projectColor(project, project.id),
+        });
+      }
+      const worker = job.assigned_to;
+      if (worker?.id && !seenW.has(worker.id)) {
+        seenW.add(worker.id);
+        workersSeen.push({
+          key: `w-${worker.id}`,
+          label: worker.name,
+          initials: worker.initials,
+          color: colorForWorker(worker.id),
+        });
       }
     });
-    return [...seen.values()].slice(0, 8);
-  }, [visibleJobs, settings.colorBy]);
-
-  const setFilterMode = (mode) => {
-    setFilterBy(mode);
-    setFilterId(mode === "workers" ? user.id : "all");
-  };
+    return {
+      projects: projectsSeen.slice(0, 8),
+      workers: workersSeen.slice(0, 12),
+    };
+  }, [visibleJobs, workerColors]);
 
   const openAdd = (date) => {
     setSelectedDate(date || ymd(today));
@@ -216,34 +285,38 @@ const CalendarView = ({ user, onSelectObject }) => {
           </button>
         </div>
         <div className="cal-filter">
-          <div className="seg">
-            <button
-              className={`seg-btn ${filterBy === "jobs" ? "on" : ""}`}
-              onClick={() => setFilterMode("jobs")}
-            >
-              {t("calendar.filterJobs")}
-            </button>
-            <button
-              className={`seg-btn ${filterBy === "workers" ? "on" : ""}`}
-              onClick={() => setFilterMode("workers")}
-            >
-              {t("calendar.filterWorkers")}
-            </button>
-          </div>
-          <SearchableSelect
-            options={filterBy === "jobs" ? jobOptions : workerOptions}
-            value={filterId}
-            onChange={setFilterId}
-            placeholder={filterBy === "jobs" ? t("calendar.searchJobs") : t("calendar.searchWorkers")}
-          />
+          <label className="cal-filter-field">
+            <span className="cal-filter-label">{t("calendar.project")}</span>
+            <SearchableSelect
+              options={projectOptions}
+              value={projectFilter}
+              onChange={setProjectFilter}
+              placeholder={t("calendar.searchProjects")}
+            />
+          </label>
+          <label className="cal-filter-field">
+            <span className="cal-filter-label">{t("calendar.workers")}</span>
+            <SearchableSelect
+              options={workerOptions}
+              value={workerFilter}
+              onChange={setWorkerFilter}
+              placeholder={t("calendar.searchWorkers")}
+            />
+          </label>
         </div>
       </div>
 
-      {legend.length > 0 && (
+      {(legend.projects.length > 0 || legend.workers.length > 0) && (
         <div className="cal-legend">
-          {legend.map((item) => (
+          {legend.projects.map((item) => (
             <div key={item.key} className="legend-pill">
-              <span className="dot" style={{ background: jobColor(item.job, settings.colorBy) }} />
+              <span className="dot" style={{ background: item.color }} />
+              {item.label}
+            </div>
+          ))}
+          {legend.workers.map((item) => (
+            <div key={item.key} className="legend-pill worker">
+              <span className="cal-chip" style={{ background: item.color }}>{item.initials || "?"}</span>
               {item.label}
             </div>
           ))}
@@ -265,7 +338,7 @@ const CalendarView = ({ user, onSelectObject }) => {
             const isToday = ds === todayStr;
             const off = isOffDay(ds, settings);
             const holiday = holidayName(ds, settings);
-            const evs = jobsOn(d);
+            const evs = groupsOn(d);
             const display = evs.slice(0, 3);
             const more = evs.length - display.length;
             return (
@@ -287,24 +360,42 @@ const CalendarView = ({ user, onSelectObject }) => {
                   )}
                 </div>
                 <div className="cal-events">
-                  {display.map((job) => (
-                    <button
-                      key={job.id}
-                      type="button"
-                      className="cal-event"
-                      style={{ background: jobColor(job, settings.colorBy), width: "100%", textAlign: "left", border: 0, cursor: job.project?.id ? "pointer" : "default" }}
-                      onClick={() => job.project?.id && onSelectObject && onSelectObject(job.project.id)}
-                    >
-                      <span className="cal-event-workers mono">
-                        {job.ends_at
-                          ? `${formatTime(job.starts_at, dateLocale)}–${formatTime(job.ends_at, dateLocale)}`
-                          : formatTime(job.starts_at, dateLocale)}
-                        {settings.showInitials && job.assigned_to?.initials ? ` · ${job.assigned_to.initials}` : ""}
-                      </span>
-                      <span className="cal-event-title">{job.project?.name}</span>
-                      <span className="cal-event-sys">{job.project?.system || job.project?.client || job.project?.address}</span>
-                    </button>
-                  ))}
+                  {display.map((group) => {
+                    const project = group.project;
+                    return (
+                      <button
+                        key={group.key}
+                        type="button"
+                        className="cal-event"
+                        style={{
+                          background: groupColor(group),
+                          width: "100%",
+                          textAlign: "left",
+                          border: 0,
+                          cursor: project?.id ? "pointer" : "default",
+                        }}
+                        onClick={() => project?.id && onSelectObject && onSelectObject(project.id)}
+                      >
+                        <span className="cal-event-workers mono">{groupTimeLabel(group, dateLocale)}</span>
+                        <span className="cal-event-title">{project?.name}</span>
+                        {group.workers.length > 0 && (
+                          <span className="cal-event-chips">
+                            {group.workers.map((person) => (
+                              <span
+                                key={person.id}
+                                className="cal-chip"
+                                title={person.name}
+                                style={{ background: colorForWorker(person.id) }}
+                              >
+                                {person.initials || "?"}
+                              </span>
+                            ))}
+                          </span>
+                        )}
+                        <span className="cal-event-sys">{project?.system || project?.client || project?.address}</span>
+                      </button>
+                    );
+                  })}
                   {more > 0 && <div className="cal-more">{t("calendar.more", { n: more })}</div>}
                 </div>
               </div>
@@ -326,7 +417,8 @@ const CalendarView = ({ user, onSelectObject }) => {
           jobs={jobs}
           settings={settings}
           initialDate={selectedDate}
-          initialWorkerId={filterBy === "workers" && filterId !== "all" ? filterId : user.id}
+          initialWorkerId={workerFilter !== "all" ? workerFilter : user.id}
+          initialProjectId={projectFilter !== "all" ? projectFilter : undefined}
           onClose={() => setShowAdd(false)}
           onCreated={async () => {
             setShowAdd(false);
@@ -360,9 +452,9 @@ const CalendarView = ({ user, onSelectObject }) => {
   );
 };
 
-const AddJobModal = ({ user, isAdmin, projects, users, jobs, settings, initialDate, initialWorkerId, onClose, onCreated }) => {
+const AddJobModal = ({ user, isAdmin, projects, users, jobs, settings, initialDate, initialWorkerId, initialProjectId, onClose, onCreated }) => {
   const { t } = useI18n();
-  const [projectId, setProjectId] = useState(projects[0]?.id || "");
+  const [projectId, setProjectId] = useState(initialProjectId || projects[0]?.id || "");
   const [date, setDate] = useState(initialDate || ymd(new Date()));
   const [endDate, setEndDate] = useState(initialDate || ymd(new Date()));
   const [time, setTime] = useState(settings.workStart || "08:00");
@@ -374,7 +466,7 @@ const AddJobModal = ({ user, isAdmin, projects, users, jobs, settings, initialDa
   const projectOptions = projects.map((p) => ({
     id: p.id,
     label: p.name,
-    sub: [p.client, p.assigned_to?.name].filter(Boolean).join(" · "),
+    sub: [p.client, assigneeNames(p)].filter(Boolean).join(" · "),
   }));
 
   const workerOptions = users.map((u) => ({

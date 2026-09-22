@@ -1,26 +1,33 @@
 import { useEffect, useState } from "react";
 import Icon from "./icons";
 import PeriodPicker from "./period-picker";
-import { fetchArchivedProjects, purgeProject, restoreProject } from "./api";
+import { fetchArchivedProjects, fetchReports, purgeProject, restoreProject } from "./api";
 import { OBJECT_STATUS_LABEL, objectStatusClass } from "./object-status";
 import { useI18n } from "./i18n";
+import ReportEntry from "./report-entry";
 
 const num = (v) => Number(v || 0);
 
-const Archive = ({ user, onSelectObject }) => {
+const Archive = ({ user, onSelectObject, onOpenReport }) => {
   const { t, dateLocale } = useI18n();
   const [items, setItems] = useState([]);
+  const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("completed");
   const [period, setPeriod] = useState(null);
   const [err, setErr] = useState("");
 
-  const load = async () => setItems(await fetchArchivedProjects());
+  const loadProjects = async () => setItems(await fetchArchivedProjects());
+
+  const loadReports = async (range) => {
+    const params = range ? { from: range.from, to: range.to } : {};
+    setReports(await fetchReports(params));
+  };
 
   useEffect(() => {
     (async () => {
       try {
-        await load();
+        await loadProjects();
       } catch (error) {
         setErr(error.message);
       } finally {
@@ -28,6 +35,10 @@ const Archive = ({ user, onSelectObject }) => {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    loadReports(period).catch((error) => setErr(error.message));
+  }, [period]);
 
   const completed = items.filter((p) => (p.archive_reason || p.status) !== "deleted" && p.status !== "deleted");
   const deleted = items.filter((p) => p.archive_reason === "deleted" || p.status === "deleted");
@@ -52,7 +63,7 @@ const Archive = ({ user, onSelectObject }) => {
   const restore = async (p) => {
     try {
       await restoreProject(p.id);
-      await load();
+      await loadProjects();
     } catch (error) {
       setErr(error.message);
     }
@@ -63,11 +74,13 @@ const Archive = ({ user, onSelectObject }) => {
     if (!window.confirm(t("archive.purgeConfirm", { id: p.id, client }))) return;
     try {
       await purgeProject(p.id);
-      await load();
+      await loadProjects();
     } catch (error) {
       setErr(error.message);
     }
   };
+
+  const showReports = tab === "reports";
 
   return (
     <div className="page">
@@ -117,10 +130,28 @@ const Archive = ({ user, onSelectObject }) => {
           <button className={`seg-btn ${tab === "all" ? "on" : ""}`} onClick={() => setTab("all")}>
             {t("archive.tabAll", { n: all.length })}
           </button>
+          <button className={`seg-btn ${tab === "reports" ? "on" : ""}`} onClick={() => setTab("reports")}>
+            {t("archive.tabReports", { n: reports.length })}
+          </button>
         </div>
 
         {loading ? (
           <div className="muted small">{t("common.loading")}</div>
+        ) : showReports ? (
+          !reports.length ? (
+            <div className="muted small ta-c" style={{ padding: 30 }}>{t("archive.reportsEmpty")}</div>
+          ) : (
+            <div className="reports-feed">
+              {reports.map((row) => (
+                <ReportEntry
+                  key={row.id}
+                  row={row}
+                  onSelectProject={onSelectObject}
+                  onOpen={onOpenReport}
+                />
+              ))}
+            </div>
+          )
         ) : (
           <table className="table">
             <thead>

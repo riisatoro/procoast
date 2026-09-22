@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import Icon from "./icons";
 import { createUser, fetchUsers, updateUser } from "./api";
 import { useI18n } from "./i18n";
+import PeriodPicker from "./period-picker";
+import CsvExportMenu from "./csv-export";
 
 const emptyForm = {
   name: "",
@@ -10,6 +12,15 @@ const emptyForm = {
   initials: "",
   user_type: "worker",
   password: "",
+};
+
+const currentMonth = () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  const last = new Date(y, m, 0).getDate();
+  const pad = (n) => String(n).padStart(2, "0");
+  return { from: `${y}-${pad(m)}-01`, to: `${y}-${pad(m)}-${pad(last)}` };
 };
 
 const UserFormModal = ({ title, initial, onClose, onSave }) => {
@@ -121,6 +132,7 @@ const UsersPage = ({ user, onOpenProfile }) => {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState("");
   const [modal, setModal] = useState(null);
+  const [period, setPeriod] = useState(currentMonth);
   const isAdmin = user?.role === "ADMINISTRATORS";
 
   const load = async () => {
@@ -188,13 +200,15 @@ const UsersPage = ({ user, onOpenProfile }) => {
           <h1 className="page-title">{t("users.title")}</h1>
           <p className="page-sub">{t("users.sub")}</p>
         </div>
-        {isAdmin && (
-          <div className="page-actions">
+        <div className="page-actions">
+          <PeriodPicker value={period} onChange={setPeriod} />
+          <CsvExportMenu from={period.from} to={period.to} />
+          {isAdmin && (
             <button className="btn btn-primary" onClick={() => setModal({ mode: "create" })}>
               <Icon name="plus" size={15} /> {t("users.new")}
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </header>
 
       {loading ? (

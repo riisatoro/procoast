@@ -3,14 +3,17 @@ import Icon from "./icons";
 import {
   addProjectMaterial,
   addProjectSpending,
+  createMaterial,
   fetchMaterials,
   fetchProject,
   fetchProjects,
   fetchTools,
+  fetchWarehouses,
   saveProjectToolChecks,
 } from "./api";
 import { useI18n } from "./i18n";
 import { lastProjectId, rememberProject } from "./last-project";
+import { emptyMaterialForm, MaterialForm } from "./material-form";
 
 const TYPE_ICONS = ["wrench", "package", "settings", "shield", "clipboard", "folder"];
 
@@ -305,29 +308,32 @@ const AddNeededModal = ({ materials, onClose, onSave }) => {
   );
 };
 
-const MaterialsTaken = ({ user, onOpenCatalog }) => {
+const MaterialsTaken = ({ user, onOpenWarehouse }) => {
   const { t } = useI18n();
   const isAdmin = user.role === "ADMINISTRATORS";
   const [projects, setProjects] = useState([]);
   const [catalog, setCatalog] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
   const [projectId, setProjectId] = useState("");
   const [project, setProject] = useState(null);
   const [taken, setTaken] = useState({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+  const [showNew, setShowNew] = useState(false);
 
   const closed = project?.status === "closed";
   const rows = project?.needed_materials || [];
   const spentMap = project?.spent_by_material || {};
 
   const loadLists = async () => {
-    const [plist, mats] = await Promise.all([fetchProjects(), fetchMaterials()]);
+    const [plist, mats, wh] = await Promise.all([fetchProjects(), fetchMaterials(), fetchWarehouses()]);
     const list = Array.isArray(plist) ? plist : [];
     setProjects(list);
     setCatalog(Array.isArray(mats) ? mats : []);
+    setWarehouses(Array.isArray(wh) ? wh : []);
     setProjectId((cur) => {
       if (cur && list.some((p) => String(p.id) === String(cur))) return cur;
       return lastProjectId(list);
@@ -406,8 +412,8 @@ const MaterialsTaken = ({ user, onOpenCatalog }) => {
       })
       .filter((row) => row.quantity);
     if (!changes.length) {
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2200);
+      setSaved(t("takenMaterials.saved"));
+      setTimeout(() => setSaved(""), 2200);
       return;
     }
     setBusy(true);
@@ -418,8 +424,8 @@ const MaterialsTaken = ({ user, onOpenCatalog }) => {
       }
       const p = await fetchProject(project.id);
       applyProject(p);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2200);
+      setSaved(t("takenMaterials.saved"));
+      setTimeout(() => setSaved(""), 2200);
     } catch (error) {
       setErr(error.message || t("api.addSpend"));
       try {
@@ -442,9 +448,14 @@ const MaterialsTaken = ({ user, onOpenCatalog }) => {
           <p className="page-sub">{t("takenMaterials.sub")}</p>
         </div>
         <div className="page-actions">
-          {onOpenCatalog && (
-            <button className="btn btn-ghost" onClick={onOpenCatalog}>
-              <Icon name="package" size={15} /> {t("materialsPage.title")}
+          {onOpenWarehouse && (
+            <button className="btn btn-ghost" onClick={onOpenWarehouse}>
+              <Icon name="warehouse" size={15} /> {t("nav.warehouses")}
+            </button>
+          )}
+          {project && !closed && (
+            <button className="btn btn-primary" onClick={() => setShowNew(true)} disabled={!warehouses.length}>
+              <Icon name="plus" size={15} /> {t("materialsPage.new")}
             </button>
           )}
           {isAdmin && project && !closed && (
@@ -555,6 +566,27 @@ const MaterialsTaken = ({ user, onOpenCatalog }) => {
         </>
       )}
 
+      {showNew && project && (
+        <MaterialForm
+          title={t("materialsPage.new")}
+          initial={emptyMaterialForm}
+          warehouses={warehouses}
+          projects={projects}
+          defaultProjectId={project.id}
+          lockProject
+          linkProject
+          onClose={() => setShowNew(false)}
+          onSave={async (payload) => {
+            await createMaterial(payload);
+            setShowNew(false);
+            await loadLists();
+            const p = await fetchProject(project.id);
+            applyProject(p);
+            setSaved(t("materialsPage.createdLinked"));
+            setTimeout(() => setSaved(""), 2200);
+          }}
+        />
+      )}
       {showAdd && (
         <AddNeededModal
           materials={catalog}
@@ -564,12 +596,12 @@ const MaterialsTaken = ({ user, onOpenCatalog }) => {
             setShowAdd(false);
             const p = await fetchProject(project.id);
             applyProject(p);
-            setSaved(true);
-            setTimeout(() => setSaved(false), 2200);
+            setSaved(t("projects.materialAdded"));
+            setTimeout(() => setSaved(""), 2200);
           }}
         />
       )}
-      {saved && <div className="toast"><Icon name="check" size={14} /> {t("takenMaterials.saved")}</div>}
+      {saved && <div className="toast"><Icon name="check" size={14} /> {saved}</div>}
     </div>
   );
 };

@@ -1,5 +1,9 @@
+from datetime import datetime, time, timedelta
+
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from django.db import models
+from django.utils import timezone
 
 
 class Warehouse(models.Model):
@@ -61,10 +65,8 @@ class Project(models.Model):
     client = models.CharField(max_length=200, blank=True)
     address = models.CharField(max_length=255, blank=True)
     description = models.TextField(blank=True)
-    assigned_to = models.ForeignKey(
+    assignees = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
         blank=True,
         related_name="assigned_projects",
     )
@@ -77,6 +79,11 @@ class Project(models.Model):
     total_m2 = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
+    planned_days = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1)],
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -99,6 +106,47 @@ class Project(models.Model):
 
     def __str__(self):
         return self.name
+
+    def schedule_start_date(self):
+        if self.start_date:
+            return self.start_date
+        if not self.created_at:
+            return None
+        created = self.created_at
+        if timezone.is_aware(created):
+            return timezone.localtime(created).date()
+        return created.date()
+
+    def elapsed_days(self, today=None):
+        start = self.schedule_start_date()
+        if start is None:
+            return None
+        today = today or timezone.localdate()
+        if today < start:
+            return 0
+        return (today - start).days + 1
+
+    def overdue_days(self, today=None):
+        if not self.planned_days or self.status in self.ARCHIVED_STATUSES:
+            return 0
+        elapsed = self.elapsed_days(today)
+        if elapsed is None or elapsed <= self.planned_days:
+            return 0
+        return elapsed - self.planned_days
+
+    def is_planned_overdue(self, today=None):
+        return self.overdue_days(today) > 0
+
+    def overdue_since(self):
+        start = self.schedule_start_date()
+        if not start or not self.planned_days:
+            return None
+        day = start + timedelta(days=self.planned_days)
+        when = datetime.combine(day, time.min)
+        tz = timezone.get_current_timezone()
+        if timezone.is_naive(when):
+            return timezone.make_aware(when, tz)
+        return when
 
 
 class ProjectMaterial(models.Model):

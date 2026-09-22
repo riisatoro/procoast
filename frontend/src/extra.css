@@ -6,7 +6,7 @@
 /* ============ MIKROANIMĀCIJAS ============ */
 @keyframes pcFadeUp {
   from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  to { opacity: 1; transform: none; }
 }
 @keyframes pcFadeIn {
   from { opacity: 0; }
@@ -24,10 +24,16 @@
 .page > *:nth-child(5) { animation-delay: .16s; }
 .page > *:nth-child(6) { animation-delay: .20s; }
 .page > *:nth-child(7) { animation-delay: .24s; }
+.page > .page-head { animation-name: pcFadeIn; }
+.page > .kpis { animation: none; z-index: 0; }
 .page > .modal-bg,
 .page > .toast,
 .modal-bg,
-.modal {
+.modal,
+.period-picker,
+.period-pop,
+.csv-export,
+.csv-menu {
   animation: none !important;
   animation-delay: 0s !important;
 }
@@ -160,6 +166,10 @@
 }
 .obj-stat-unit { font-size: 13px; color: var(--text-muted); margin-left: 3px; font-weight: 400; }
 .obj-stat-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.obj-stat.warn {
+  background: rgba(244,164,66,0.10);
+  box-shadow: inset 3px 0 0 #B66B0F, var(--shadow);
+}
 
 /* TIMELINE */
 .timeline {
@@ -426,6 +436,10 @@
   transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(0,0,0,0.1);
 }
+.user-card.overdue {
+  background: rgba(244,164,66,0.10);
+  box-shadow: inset 3px 0 0 #B66B0F, var(--shadow);
+}
 .user-card.inactive {
   opacity: 0.62;
 }
@@ -536,6 +550,8 @@
   .hours-day-val { font-size: 13px; }
   .activity-row { grid-template-columns: 1fr; gap: 4px; }
   .activity-row .activity-hours { justify-self: end; margin-top: -22px; }
+  .entry-when { margin-left: 0; width: 100%; }
+  .entry-project-addr { margin-left: 0; }
   .spend-adjust { width: 100%; }
   .fab { padding: 12px 16px; bottom: 16px; right: 16px; font-size: 12px; }
   .modal { width: 95vw; max-width: 95vw; }
@@ -623,6 +639,7 @@
   font-size: 13px;
   align-items: flex-start;
 }
+.notif-item.clickable { cursor: pointer; }
 .notif-item:last-child { border-bottom: 0; }
 .notif-item:hover { background: var(--bg-card-2); }
 .notif-item.unread { background: rgba(44,95,46,0.04); }
@@ -637,6 +654,27 @@
 .notif-icon.green { background: var(--green-soft); color: var(--green); }
 .notif-icon.warn { background: rgba(244,164,66,0.15); color: #B66B0F; }
 .notif-icon.danger { background: rgba(229,57,53,0.12); color: var(--danger); }
+.notif-icon.info { background: rgba(244,164,66,0.22); color: #8A5208; }
+.notif-item.info {
+  background: rgba(244,164,66,0.14);
+  box-shadow: inset 3px 0 0 #B66B0F;
+}
+.notif-item.info.unread { background: rgba(244,164,66,0.22); }
+.notif-item.info:hover { background: rgba(244,164,66,0.18); }
+.notif-title-row { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
+.notif-info-pill {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: rgba(244,164,66,0.32);
+  color: #8A5208;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.notif-item.info .notif-title { color: #8A5208; }
+.overdue-note { color: #8A5208; font-weight: 600; }
 .notif-body { flex: 1; min-width: 0; }
 .notif-title { font-weight: 600; line-height: 1.3; }
 .notif-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
@@ -763,6 +801,44 @@
 .ss-empty { padding: 12px; font-size: 12px; color: var(--text-muted); }
 .field .ss { width: 100%; }
 .modal-dropdown { overflow: visible; }
+
+.csv-export { position: relative; }
+.csv-export .btn { gap: 8px; }
+.csv-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 260px;
+  background: var(--bg-card);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.csv-menu-hint {
+  padding: 8px 10px 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.csv-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.csv-menu-item:hover { background: var(--bg-soft); }
+.csv-menu-item:disabled { opacity: 0.55; }
+.csv-menu-err { margin: 6px 8px 4px; }
 
 @media (max-width: 768px) {
   .cal-filter { width: 100%; }

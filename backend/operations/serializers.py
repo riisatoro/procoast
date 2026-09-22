@@ -1,7 +1,10 @@
+from datetime import timedelta
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.db.models import Sum
 from rest_framework import serializers
-from decimal import Decimal
 
 from .models import (
     ActivityLog,
@@ -55,6 +58,20 @@ class MaterialSerializer(serializers.ModelSerializer):
     created_by = UserBriefSerializer(read_only=True)
     warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
     warehouse_location = serializers.CharField(source="warehouse.location", read_only=True)
+    linked_projects = serializers.SerializerMethodField()
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Project.objects.exclude(status__in=Project.ARCHIVED_STATUSES),
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+    quantity_needed = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = Material
@@ -68,10 +85,71 @@ class MaterialSerializer(serializers.ModelSerializer):
             "warehouse_name",
             "warehouse_location",
             "stock",
+            "linked_projects",
+            "project",
+            "quantity_needed",
             "created_by",
             "created_at",
             "updated_at",
         )
+
+    def get_linked_projects(self, obj):
+        result = []
+        for row in obj.project_needs.all():
+            project = row.project
+            if project.status in Project.ARCHIVED_STATUSES:
+                continue
+            result.append(
+                {
+                    "id": project.id,
+                    "name": project.name,
+                    "client": project.client,
+                    "quantity_needed": str(row.quantity_needed),
+                }
+            )
+        return result
+
+    def validate(self, attrs):
+        if self.instance is None and not attrs.get("project"):
+            raise serializers.ValidationError(
+                {"project": ["Jaunam materiālam jānorāda objekts."]}
+            )
+        project = attrs.get("project")
+        qty = attrs.get("quantity_needed")
+        if self.instance is None and project is not None:
+            if qty in (None, ""):
+                per_m2 = attrs.get("per_m2")
+                if per_m2 is not None and project.total_m2:
+                    attrs["quantity_needed"] = (
+                        Decimal(per_m2) * Decimal(project.total_m2)
+                    ).quantize(Decimal("0.01"))
+                else:
+                    raise serializers.ValidationError(
+                        {"quantity_needed": ["Norādi vajadzīgo daudzumu."]}
+                    )
+            elif qty <= 0:
+                raise serializers.ValidationError(
+                    {"quantity_needed": ["Daudzumam jābūt lielākam par 0."]}
+                )
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        project = validated_data.pop("project", None)
+        qty = validated_data.pop("quantity_needed", None)
+        material = super().create(validated_data)
+        if project is not None and qty is not None:
+            ProjectMaterial.objects.get_or_create(
+                project=project,
+                material=material,
+                defaults={"quantity_needed": qty},
+            )
+        return material
+
+    def update(self, instance, validated_data):
+        validated_data.pop("project", None)
+        validated_data.pop("quantity_needed", None)
+        return super().update(instance, validated_data)
 
 
 class ToolTypeSerializer(serializers.ModelSerializer):
@@ -223,9 +301,15 @@ class MaterialSpendingSerializer(serializers.ModelSerializer):
 
 
 class ProjectListSerializer(serializers.ModelSerializer):
-    assigned_to = UserBriefSerializer(read_only=True)
+    assigned_to = UserBriefSerializer(source="assignees", many=True, read_only=True)
+    assigned_to_ids = serializers.PrimaryKeyRelatedField(
+        source="assignees",
+        queryset=User.objects.all(),
+        many=True,
+        write_only=True,
+        required=False,
+    )
     assigned_to_id = serializers.PrimaryKeyRelatedField(
-        source="assigned_to",
         queryset=User.objects.all(),
         write_only=True,
         required=False,
@@ -233,6 +317,9 @@ class ProjectListSerializer(serializers.ModelSerializer):
     )
     created_by = UserBriefSerializer(read_only=True)
     archive_reason = serializers.SerializerMethodField()
+    elapsed_days = serializers.SerializerMethodField()
+    planned_days_exceeded = serializers.SerializerMethodField()
+    overdue_days = serializers.SerializerMethodField()
     tasks = serializers.ListField(child=serializers.DictField(), write_only=True, required=False)
     materials = serializers.ListField(child=serializers.DictField(), write_only=True, required=False)
 
@@ -249,8 +336,13 @@ class ProjectListSerializer(serializers.ModelSerializer):
             "total_m2",
             "start_date",
             "end_date",
+            "planned_days",
+            "elapsed_days",
+            "planned_days_exceeded",
+            "overdue_days",
             "assigned_to",
             "assigned_to_id",
+            "assigned_to_ids",
             "status",
             "archive_reason",
             "created_by",
@@ -260,8 +352,20 @@ class ProjectListSerializer(serializers.ModelSerializer):
             "tasks",
             "materials",
         )
-        read_only_fields = ("status", "closed_at", "created_at", "updated_at", "archive_reason")
-        extra_kwargs = {"name": {"required": False, "allow_blank": True}}
+        read_only_fields = (
+            "status",
+            "closed_at",
+            "created_at",
+            "updated_at",
+            "archive_reason",
+            "elapsed_days",
+            "planned_days_exceeded",
+            "overdue_days",
+        )
+        extra_kwargs = {
+            "name": {"required": False, "allow_blank": True},
+            "planned_days": {"required": False, "allow_null": True, "min_value": 1},
+        }
 
     def get_archive_reason(self, obj):
         if obj.status == Project.Status.DELETED:
@@ -269,6 +373,37 @@ class ProjectListSerializer(serializers.ModelSerializer):
         if obj.status == Project.Status.CLOSED:
             return "completed"
         return None
+
+    def get_elapsed_days(self, obj):
+        return obj.elapsed_days()
+
+    def get_planned_days_exceeded(self, obj):
+        return obj.is_planned_overdue()
+
+    def get_overdue_days(self, obj):
+        overdue = obj.overdue_days()
+        return overdue or None
+
+    def validate_planned_days(self, value):
+        if value in ("", None):
+            return None
+        if value < 1:
+            raise serializers.ValidationError("Plānotajām dienām jābūt vismaz 1.")
+        return value
+
+    def validate(self, attrs):
+        planned = attrs["planned_days"] if "planned_days" in attrs else getattr(self.instance, "planned_days", None)
+        start = attrs["start_date"] if "start_date" in attrs else getattr(self.instance, "start_date", None)
+        end = attrs["end_date"] if "end_date" in attrs else getattr(self.instance, "end_date", None)
+        if planned and start and not end:
+            attrs["end_date"] = start + timedelta(days=int(planned) - 1)
+        single = attrs.pop("assigned_to_id", None)
+        if single is not None:
+            people = list(attrs.get("assignees") or [])
+            if single not in people:
+                people.append(single)
+            attrs["assignees"] = people
+        return attrs
 
 
 class ProjectTaskSerializer(serializers.ModelSerializer):
@@ -337,7 +472,8 @@ class DailyReportSerializer(serializers.ModelSerializer):
         for line in obj.material_lines.all():
             if line.quantity:
                 mat = line.material
-                parts.append(f"{line.quantity} {mat.unit} {mat.name}")
+                label = f"{mat.name} ({mat.color})" if mat.color else mat.name
+                parts.append(f"{line.quantity} {mat.unit} {label}")
         return ", ".join(parts[:4])
 
     def get_project(self, obj):
@@ -413,7 +549,7 @@ class ProjectDetailSerializer(ProjectListSerializer):
 
 
 class ProjectBriefSerializer(serializers.ModelSerializer):
-    assigned_to = UserBriefSerializer(read_only=True)
+    assigned_to = UserBriefSerializer(source="assignees", many=True, read_only=True)
 
     class Meta:
         model = Project

@@ -191,7 +191,7 @@
       "total_m2": 300,
       "start_date": "2026-04-15",
       "end_date": "2026-05-20",
-      "assigned_to": "arturs",
+      "assigned_to": ["arturs", "kristians"],
       "tasks": [
         {"name": "Virsmas slīpēšana", "unit": "m²", "quantity_total": 300},
         {"name": "EP02 Color ieklāšana", "unit": "m²", "quantity_total": 300},
@@ -280,7 +280,7 @@
       "total_m2": 850,
       "start_date": "2026-05-20",
       "end_date": "2026-07-15",
-      "assigned_to": "arturs",
+      "assigned_to": ["arturs", "kristians", "denis", "igors"],
       "tasks": [
         {"name": "Virsmas slīpēšana", "unit": "m²", "quantity_total": 850},
         {"name": "EP01 ieklāšana", "unit": "m²", "quantity_total": 850}

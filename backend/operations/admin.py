@@ -88,14 +88,16 @@ class ProjectAdmin(admin.ModelAdmin):
         "name",
         "client",
         "status",
-        "assigned_to",
+        "assignee_list",
         "system",
+        "planned_days",
         "seed_key",
         "created_at",
         "closed_at",
     )
     list_filter = ("status",)
     search_fields = ("name", "client", "address", "system", "seed_key")
+    filter_horizontal = ("assignees",)
     inlines = [
         ProjectMaterialInline,
         ProjectTaskInline,
@@ -104,6 +106,15 @@ class ProjectAdmin(admin.ModelAdmin):
         ExpenseInline,
         SpendingInline,
     ]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("assignees")
+
+    def assignee_list(self, obj):
+        names = [person.name for person in obj.assignees.all()]
+        return ", ".join(names) if names else "—"
+
+    assignee_list.short_description = "Assignees"
 
 
 @admin.register(ProjectMaterial)

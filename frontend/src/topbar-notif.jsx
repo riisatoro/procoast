@@ -10,6 +10,22 @@ function normalizeItems(data) {
   return [];
 }
 
+function notifCopy(n, t) {
+  if (n.code === "planned_days_exceeded") {
+    return {
+      title: t("notif.plannedDaysExceeded"),
+      sub: t("notif.plannedDaysExceededSub", {
+        id: n.project_id,
+        name: n.project_name || "",
+        planned: n.planned_days,
+        elapsed: n.elapsed_days,
+        overdue: n.overdue_days,
+      }),
+    };
+  }
+  return { title: n.title, sub: n.sub };
+}
+
 function notifTime(iso, t, dateLocale) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -25,7 +41,7 @@ function notifTime(iso, t, dateLocale) {
   return d.toLocaleDateString(dateLocale);
 }
 
-const NotificationsPop = ({ items: initialItems, onClose, onMarkAll, onLoaded }) => {
+const NotificationsPop = ({ items: initialItems, onClose, onMarkAll, onLoaded, onOpenReport, onSelectObject }) => {
   const { t, dateLocale } = useI18n();
   const [items, setItems] = useState(initialItems || []);
   const [seen, setSeen] = useState(loadNotifSeen);
@@ -75,14 +91,38 @@ const NotificationsPop = ({ items: initialItems, onClose, onMarkAll, onLoaded })
           {!items.length && !err && <div className="muted small" style={{ padding: 16 }}>{t("notif.empty")}</div>}
           {items.map((n) => {
             const isUnread = !seen || String(n.created_at || "") > seen;
+            const isInfo = n.kind === "info" || n.source === "schedule" || n.code === "planned_days_exceeded";
+            const copy = notifCopy(n, t);
+            const iconKind = n.kind === "green" ? "green" : n.kind === "warn" ? "warn" : n.kind === "danger" ? "danger" : isInfo ? "info" : "";
+            const clickable = Boolean(n.report_id || n.project_id);
+            const open = () => {
+              if (n.report_id && onOpenReport) onOpenReport(n.report_id);
+              else if (n.project_id && onSelectObject) onSelectObject(n.project_id);
+              onClose && onClose();
+            };
             return (
-              <div key={n.id} className={`notif-item ${isUnread ? "unread" : ""}`}>
-                <div className={`notif-icon ${n.kind === "green" ? "green" : n.kind === "warn" ? "warn" : n.kind === "danger" ? "danger" : ""}`}>
+              <div
+                key={n.id}
+                className={`notif-item ${isUnread ? "unread" : ""} ${isInfo ? "info" : ""} ${clickable ? "clickable" : ""}`}
+                role={clickable ? "button" : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                onClick={clickable ? open : undefined}
+                onKeyDown={clickable ? (e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    open();
+                  }
+                } : undefined}
+              >
+                <div className={`notif-icon ${iconKind}`}>
                   <Icon name={n.icon || "bell"} size={14} />
                 </div>
                 <div className="notif-body">
-                  <div className="notif-title">{n.title}</div>
-                  <div className="notif-sub">{n.sub}</div>
+                  <div className="notif-title-row">
+                    <div className="notif-title">{copy.title}</div>
+                    {isInfo && <span className="notif-info-pill">{t("notif.info")}</span>}
+                  </div>
+                  <div className="notif-sub">{copy.sub}</div>
                   <div className="notif-time">{notifTime(n.created_at, t, dateLocale)}</div>
                 </div>
               </div>

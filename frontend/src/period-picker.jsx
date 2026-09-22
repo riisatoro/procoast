@@ -1,6 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Icon from "./icons";
 import { useI18n } from "./i18n";
+
+const POP_WIDTH = 320;
+
+const placePop = (anchor) => {
+  if (!anchor) return { top: 0, left: 0 };
+  const r = anchor.getBoundingClientRect();
+  const left = Math.min(Math.max(8, r.right - POP_WIDTH), window.innerWidth - POP_WIDTH - 8);
+  return { top: r.bottom + 6, left };
+};
 
 const ymd = (y, m, d) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 const lastDay = (y, m) => new Date(y, m, 0).getDate();
@@ -23,12 +33,33 @@ const PeriodPicker = ({ value, onChange }) => {
   const [year, setYear] = useState(2026);
   const [customFrom, setCustomFrom] = useState(value?.from || "2026-05-01");
   const [customTo, setCustomTo] = useState(value?.to || "2026-05-31");
+  const [pos, setPos] = useState({ top: 0, left: 0 });
   const ref = useRef(null);
+  const popRef = useRef(null);
   const monthsShort = t("monthsShort");
   const months = t("months");
 
+  useLayoutEffect(() => {
+    if (!open) return;
+    setPos(placePop(ref.current));
+  }, [open, tab]);
+
   useEffect(() => {
-    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    if (!open) return;
+    const onWin = () => setPos(placePop(ref.current));
+    window.addEventListener("resize", onWin);
+    window.addEventListener("scroll", onWin, true);
+    return () => {
+      window.removeEventListener("resize", onWin);
+      window.removeEventListener("scroll", onWin, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    const onDoc = (e) => {
+      if (ref.current?.contains(e.target) || popRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
@@ -73,8 +104,8 @@ const PeriodPicker = ({ value, onChange }) => {
         <span className="period-label">{label}</span>
         <Icon name="chevronDown" size={12} />
       </button>
-      {open && (
-        <div className="period-pop">
+      {open && createPortal(
+        <div className="period-pop" ref={popRef} style={{ top: pos.top, left: pos.left }}>
           <div className="period-tabs">
             <button className={`pp-tab ${tab === "month" ? "on" : ""}`} onClick={() => setTab("month")}>{t("period.month")}</button>
             <button className={`pp-tab ${tab === "quarter" ? "on" : ""}`} onClick={() => setTab("quarter")}>{t("period.quarter")}</button>
@@ -136,7 +167,8 @@ const PeriodPicker = ({ value, onChange }) => {
               <button className="btn btn-primary pp-apply" onClick={applyCustom}>{t("period.apply")}</button>
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -9,6 +9,7 @@ const Sidebar = ({ user, currentSection, onNavigate, onLogout, mobileOpen, onClo
     { id: "dashboard", label: t("nav.dashboard"), icon: "chart", adminOnly: true },
     { id: "calendar", label: t("nav.calendar"), icon: "calendar" },
     { id: "tools", label: t("nav.tools"), icon: "wrench" },
+    { id: "warehouses", label: t("nav.warehouses"), icon: "warehouse" },
     { id: "materials", label: t("nav.materials"), icon: "package" },
     { id: "archive", label: t("nav.archive"), icon: "archive", adminOnly: true },
     { id: "users", label: t("nav.users"), icon: "users", adminOnly: true },

@@ -11,6 +11,7 @@ import {
 import { STATUS_LABEL, statusClass } from "./projects";
 import { useI18n } from "./i18n";
 import { lastProjectId, rememberProject } from "./last-project";
+import ReportEntry from "./report-entry";
 
 const PALETTE = ["#2C5F2E", "#5B7DB1", "#F4A442", "#A66A8E", "#6E5B8A", "#7A8B5C", "#B85C5C", "#5C8B8B"];
 const num = (v) => Number(v || 0);
@@ -20,7 +21,7 @@ const todayStr = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
-const Reports = ({ user }) => {
+const Reports = ({ user, onOpenReport }) => {
   const { t, dateLocale } = useI18n();
   const isAdmin = user.role === "ADMINISTRATORS";
   const [projects, setProjects] = useState([]);
@@ -33,6 +34,7 @@ const Reports = ({ user }) => {
   const [notes, setNotes] = useState("");
   const [mine, setMine] = useState(null);
   const [todayList, setTodayList] = useState([]);
+  const [mineHistory, setMineHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -42,6 +44,9 @@ const Reports = ({ user }) => {
   const closed = project?.status === "closed";
   const tasks = project?.tasks || [];
   const materials = project?.needed_materials || [];
+  const materialColors = [...new Set(
+    materials.map((row) => String(row.material_detail?.color || "").trim()).filter(Boolean)
+  )];
   const volume = num(project?.total_m2);
   const doneM2 = num(project?.done_m2);
   const pct = volume ? Math.min(100, Math.round((doneM2 / volume) * 100)) : 0;
@@ -114,6 +119,20 @@ const Reports = ({ user }) => {
     };
   }, [projectId, date, user.id, isAdmin]);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetchReports({ recorded_by: user.id })
+      .then((rows) => {
+        if (!cancelled) setMineHistory(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (!cancelled) setMineHistory([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user.id]);
+
   const bump = (state, setState, key, delta) => {
     setState({ ...state, [key]: Math.max(0, round2((state[key] || 0) + delta)) });
   };
@@ -150,6 +169,7 @@ const Reports = ({ user }) => {
         setMine(savedRow);
         setProject(await fetchProject(project.id));
         if (isAdmin) setTodayList(await fetchReports({ date }));
+        setMineHistory(await fetchReports({ recorded_by: user.id }).catch(() => []));
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2200);
@@ -176,6 +196,7 @@ const Reports = ({ user }) => {
     try {
       await deleteReport(id);
       if (isAdmin) setTodayList(await fetchReports({ date }));
+      setMineHistory(await fetchReports({ recorded_by: user.id }).catch(() => []));
       if (project) setProject(await fetchProject(project.id));
       if (mine?.id === id) {
         clear();
@@ -235,10 +256,34 @@ const Reports = ({ user }) => {
                   </div>
                   <div className={`status ${statusClass(project.status)}`}>{t(STATUS_LABEL[project.status] || project.status)}</div>
                 </div>
+                {project.planned_days_exceeded && (
+                  <div className="info-strip" style={{ marginTop: 12 }}>
+                    <Icon name="clock" size={14} />
+                    <span>{t("object.overdueBanner", { planned: project.planned_days, elapsed: project.elapsed_days, overdue: project.overdue_days })}</span>
+                  </div>
+                )}
                 <div className="summary-grid">
                   <div><div className="summary-label">{t("reports.system")}</div><div className="summary-val">{project.system || t("common.dash")}</div></div>
+                  <div>
+                    <div className="summary-label">{t("newObject.ral")}</div>
+                    <div className="summary-val">
+                      {materialColors.length
+                        ? <span className="mat-color-list">{materialColors.map((c) => <span key={c} className="mat-color-chip">{c}</span>)}</span>
+                        : t("common.dash")}
+                    </div>
+                  </div>
                   <div><div className="summary-label">{t("reports.volume")}</div><div className="summary-val mono">{volume ? `${volume} m²` : t("common.dash")}</div></div>
                   <div><div className="summary-label">{t("reports.start")}</div><div className="summary-val mono">{project.start_date || t("common.dash")}</div></div>
+                  <div>
+                    <div className="summary-label">{t("newObject.plannedDays")}</div>
+                    <div className={`summary-val mono ${project.planned_days_exceeded ? "overdue-note" : ""}`}>
+                      {project.planned_days
+                        ? (project.planned_days_exceeded
+                          ? t("projects.plannedOverdue", { planned: project.planned_days, elapsed: project.elapsed_days, overdue: project.overdue_days })
+                          : t("object.plannedDaysVal", { n: project.planned_days }))
+                        : t("common.dash")}
+                    </div>
+                  </div>
                   <div><div className="summary-label">{t("reports.plannedEnd")}</div><div className="summary-val mono">{project.end_date || t("common.dash")}</div></div>
                 </div>
                 <div className="summary-progress">
@@ -321,6 +366,7 @@ const Reports = ({ user }) => {
                 {!materials.length ? (
                   <div className="muted small">{t("reports.noMaterials")}</div>
                 ) : (
+                  <div className="table-scroll">
                   <div className="data-table">
                     <div className="dt-head mat-head">
                       <div>{t("common.material")}</div>
@@ -339,8 +385,11 @@ const Reports = ({ user }) => {
                       const stockBase = stock + savedToday;
                       return (
                         <div key={row.id} className="dt-row mat-row">
-                          <div className="dt-name">{m.name}</div>
-                          <div className="muted">{m.color || t("common.dash")}</div>
+                          <div className="dt-name">
+                            {m.name}
+                            {m.color ? <span className="mat-color"> · {m.color}</span> : null}
+                          </div>
+                          <div>{m.color ? <span className="mat-color-chip">{m.color}</span> : <span className="muted">{t("common.dash")}</span>}</div>
                           <div className="ta-c mono small">{m.per_m2 != null ? `${m.per_m2} ${m.unit}/m²` : t("common.dash")}</div>
                           <div className="ta-c">
                             <div className="step-stack">
@@ -361,6 +410,7 @@ const Reports = ({ user }) => {
                         </div>
                       );
                     })}
+                  </div>
                   </div>
                 )}
               </section>
@@ -396,23 +446,39 @@ const Reports = ({ user }) => {
           {!todayList.length ? (
             <div className="muted small">{t("reports.noToday")}</div>
           ) : (
-            <table className="table">
-              <thead><tr><th>{t("reports.worker")}</th><th>{t("reports.object")}</th><th>{t("reports.works")}</th><th>{t("reports.time")}</th><th></th></tr></thead>
-              <tbody>
-                {todayList.map((r) => (
-                  <tr key={r.id}>
-                    <td><div className="cell-user"><span className="avatar xs">{r.recorded_by?.initials}</span> {r.recorded_by?.name}</div></td>
-                    <td><span className="mono small muted">#{r.project?.id}</span> {r.project?.client || r.project?.name}</td>
-                    <td>{r.summary || t("common.dash")}</td>
-                    <td className="mono small">{r.updated_at ? new Date(r.updated_at).toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" }) : ""}</td>
-                    <td className="ta-r"><button className="icon-btn sm danger" onClick={() => removeReport(r.id)}><Icon name="trash" size={13} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="reports-feed">
+              {todayList.map((r) => (
+                <ReportEntry
+                  key={r.id}
+                  row={r}
+                  onOpen={onOpenReport}
+                  action={
+                    <button className="icon-btn sm danger" onClick={() => removeReport(r.id)} title={t("common.delete")}>
+                      <Icon name="trash" size={13} />
+                    </button>
+                  }
+                />
+              ))}
+            </div>
           )}
         </section>
       )}
+
+      <section className="card">
+        <div className="card-head">
+          <h2 className="card-title">{t("reports.myHistory")}</h2>
+          <span className="badge">{mineHistory.length}</span>
+        </div>
+        {!mineHistory.length ? (
+          <div className="muted small">{t("entry.none")}</div>
+        ) : (
+          <div className="reports-feed">
+            {mineHistory.map((r) => (
+              <ReportEntry key={r.id} row={r} hidePerson onOpen={onOpenReport} />
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 };
