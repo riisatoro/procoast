@@ -190,9 +190,6 @@ const WorkerProfile = ({ user, profileUserId, onBack, onSelectObject, onOpenRepo
               <button className="btn btn-outline"><Icon name="mail" size={15} /> {t("profile.sendEmail")}</button>
             </>
           )}
-          {isSelf && (
-            <button className="btn btn-outline"><Icon name="settings" size={15} /> {t("profile.settings")}</button>
-          )}
         </div>
       </section>
 

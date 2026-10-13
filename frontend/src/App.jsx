@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Login from "./login";
 import Sidebar from "./sidebar";
+import AdminProjectsSidebar from "./admin-projects-sidebar";
 import { MobileTopbar, NotificationsPop, normalizeItems } from "./topbar-notif";
 import Dashboard from "./dashboard";
 import CalendarView from "./calendar";
@@ -16,10 +17,10 @@ import ReportDetail from "./report-detail";
 import WorkerProfile from "./worker-profile";
 import NewObjectModal from "./new-object";
 import Icon from "./icons";
-import { clearSession, createProject, fetchArchivedProjects, fetchMe, fetchNotifications, fetchProjects, getToken, onUnauthorized } from "./api";
+import { clearSession, createProject, fetchArchivedProjects, fetchMe, fetchNotifications, fetchProject, fetchProjects, getStoredUser, getToken, onUnauthorized, updateProject } from "./api";
 import { LanguageSwitch, useI18n } from "./i18n";
 import { rememberProject } from "./last-project";
-import { loadNotifSeen, saveNotifSeen, unreadCount } from "./notif-seen";
+import { loadNotifSeen, unreadCount } from "./notif-seen";
 
 const NAV_KEY = "procoast-nav";
 const MAIN_SECTIONS = new Set([
@@ -36,7 +37,7 @@ const MAIN_SECTIONS = new Set([
   "profile",
   "report-detail",
 ]);
-const ADMIN_ONLY_SECTIONS = new Set(["dashboard", "users", "archive"]);
+const ADMIN_ONLY_SECTIONS = new Set(["users", "archive"]);
 
 function defaultSection(user) {
   return user?.role === "ADMINISTRATORS" ? "dashboard" : "calendar";
@@ -83,6 +84,7 @@ const App = () => {
   const [section, setSection] = useState("dashboard");
   const [savedToast, setSavedToast] = useState(null);
   const [showNewObj, setShowNewObj] = useState(false);
+  const [editingProject, setEditingProject] = useState(null);
   const [nextId, setNextId] = useState(1);
   const [creating, setCreating] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
@@ -94,6 +96,8 @@ const App = () => {
   const [notifItems, setNotifItems] = useState([]);
   const [notifSeen, setNotifSeen] = useState(loadNotifSeen);
   const [rev, setRev] = useState(0);
+  const [listRev, setListRev] = useState(0);
+  const [objectReturn, setObjectReturn] = useState(null);
 
   const isAdmin = user?.role === "ADMINISTRATORS";
 
@@ -113,6 +117,7 @@ const App = () => {
       setProfileUserId(null);
       setReportId(null);
       setReportReturn(null);
+      setObjectReturn(null);
     });
   }, []);
 
@@ -122,7 +127,11 @@ const App = () => {
   }, [user, section, detailObjectId, profileUserId, reportId, reportReturn]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || user.role !== "ADMINISTRATORS") {
+      setNotifItems([]);
+      setShowNotif(false);
+      return;
+    }
     fetchNotifications()
       .then((data) => setNotifItems(normalizeItems(data)))
       .catch(() => setNotifItems([]));
@@ -131,23 +140,32 @@ const App = () => {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!getToken()) {
+      if (!getToken() && !getStoredUser()) {
         if (!cancelled) setReady(true);
         return;
+      }
+      const applyUser = (person) => {
+        setUser(person);
+        const nav = navForUser(person, readNav());
+        setSection(nav.section);
+        setDetailObjectId(nav.detailObjectId);
+        setProfileUserId(nav.profileUserId);
+        setReportId(nav.reportId);
+        setReportReturn(nav.reportReturn);
+      };
+      const cached = getStoredUser();
+      if (cached && !cancelled) {
+        applyUser(cached);
+        setReady(true);
       }
       try {
         const me = await fetchMe();
         if (me && !cancelled) {
-          setUser(me);
-          const nav = navForUser(me, readNav());
-          setSection(nav.section);
-          setDetailObjectId(nav.detailObjectId);
-          setProfileUserId(nav.profileUserId);
-          setReportId(nav.reportId);
-          setReportReturn(nav.reportReturn);
+          if (cached) setUser(me);
+          else applyUser(me);
         }
       } catch {
-        clearSession();
+        // Keep the cached session if the network is down or the access token is being refreshed.
       } finally {
         if (!cancelled) setReady(true);
       }
@@ -165,6 +183,7 @@ const App = () => {
     setProfileUserId(null);
     setReportId(null);
     setReportReturn(null);
+    setObjectReturn(null);
     writeNav({ section: home, detailObjectId: null, profileUserId: null, reportId: null, reportReturn: null });
     setRev((r) => r + 1);
   };
@@ -178,6 +197,7 @@ const App = () => {
     setProfileUserId(null);
     setReportId(null);
     setReportReturn(null);
+    setObjectReturn(null);
   };
 
   const navigateSection = (s) => {
@@ -193,6 +213,15 @@ const App = () => {
 
   const openObjectDetail = (id) => {
     rememberProject(id);
+    if (
+      section
+      && MAIN_SECTIONS.has(section)
+      && section !== "object-detail"
+      && section !== "report-detail"
+      && section !== "profile"
+    ) {
+      setObjectReturn(section);
+    }
     setProfileUserId(null);
     setReportId(null);
     setReportReturn(null);
@@ -200,6 +229,25 @@ const App = () => {
     setSection("object-detail");
     setMobileNav(false);
     setShowNotif(false);
+  };
+
+  const closeNewObject = () => {
+    setShowNewObj(false);
+    setEditingProject(null);
+  };
+
+  const openEditProject = async (projectOrId) => {
+    const id = typeof projectOrId === "object" ? projectOrId?.id : projectOrId;
+    if (id == null) return;
+    try {
+      const detail = await fetchProject(id);
+      setEditingProject(detail);
+      setNextId(detail.id);
+      setShowNewObj(true);
+    } catch (error) {
+      setSavedToast(error.message || t("api.loadProject"));
+      setTimeout(() => setSavedToast(null), 2600);
+    }
   };
 
   const openProfile = (id) => {
@@ -257,11 +305,13 @@ const App = () => {
   if (section === "object-detail" && detailObjectId) {
     content = (
       <ObjectDetail
+        key={`${detailObjectId}-${rev}`}
         user={user}
         objectId={detailObjectId}
-        onBack={() => navigateSection(isAdmin ? "dashboard" : "calendar")}
+        onBack={() => navigateSection(objectReturn || defaultSection(user))}
         onNavigate={navigateSection}
         onOpenReport={openReport}
+        onEdit={isAdmin ? openEditProject : undefined}
       />
     );
   } else if (section === "profile" && profileUserId) {
@@ -286,14 +336,14 @@ const App = () => {
     );
   } else {
     const sections = {
-      dashboard: <Dashboard key={rev} user={user} onNavigate={navigateSection} onSelectObject={openObjectDetail} onOpenReport={openReport} />,
-      calendar: <CalendarView user={user} onSelectObject={openObjectDetail} />,
+      dashboard: <Dashboard key={rev} user={user} onNavigate={navigateSection} onSelectObject={openObjectDetail} onOpenReport={openReport} onEditProject={openEditProject} onProjectsChanged={() => setListRev((r) => r + 1)} />,
+      calendar: <CalendarView key={rev} user={user} onSelectObject={openObjectDetail} />,
       reports: <Reports user={user} onOpenReport={openReport} />,
       tools: <ToolsPage user={user} />,
       warehouses: <WarehousesPage user={user} />,
       materials: <MaterialsPage user={user} onOpenWarehouse={() => navigateSection("warehouses")} />,
-      projects: <ProjectsPage user={user} />,
-      archive: <Archive user={user} onSelectObject={openObjectDetail} onOpenReport={openReport} />,
+      projects: <ProjectsPage key={rev} user={user} onEditProject={openEditProject} />,
+      archive: <Archive user={user} onSelectObject={openObjectDetail} onOpenReport={openReport} onProjectsChanged={() => setListRev((r) => r + 1)} />,
       users: <UsersPage user={user} onOpenProfile={openProfile} />,
     };
     content = sections[section] || sections.calendar;
@@ -301,7 +351,7 @@ const App = () => {
 
   const returnSection = reportReturn && typeof reportReturn === "object" ? reportReturn.section : reportReturn;
   const navSection = section === "object-detail"
-    ? "dashboard"
+    ? (objectReturn || defaultSection(user))
     : section === "profile"
       ? "users"
       : section === "report-detail"
@@ -312,15 +362,25 @@ const App = () => {
 
   return (
     <div className="app">
-      <Sidebar
-        user={user}
-        currentSection={navSection}
-        onNavigate={navigateSection}
-        onLogout={handleLogout}
-        mobileOpen={mobileNav}
-        onCloseMobile={() => setMobileNav(false)}
-        onOpenProfile={openProfile}
-      />
+      <div className={`side-stack ${mobileNav ? "open" : ""}`}>
+        <Sidebar
+          user={user}
+          currentSection={navSection}
+          onNavigate={navigateSection}
+          onLogout={handleLogout}
+          mobileOpen={mobileNav}
+          onCloseMobile={() => setMobileNav(false)}
+          onOpenProfile={openProfile}
+        />
+        {isAdmin && (
+          <AdminProjectsSidebar
+            currentProjectId={detailObjectId}
+            onSelect={openObjectDetail}
+            refreshKey={`${rev}-${listRev}`}
+            section={section}
+          />
+        )}
+      </div>
       {mobileNav && <div className="sidebar-backdrop show" onClick={() => setMobileNav(false)} />}
 
       <main className="main" data-screen-label={section}>
@@ -328,27 +388,27 @@ const App = () => {
 
         <div style={{ position: "absolute", top: 24, right: 24, zIndex: 30, display: "flex", alignItems: "center", gap: 10 }}>
           <LanguageSwitch variant="light" />
-          <div className="bell-wrap">
-            <button className="bell-btn" onClick={() => setShowNotif((s) => !s)} title={t("app.notifications")}>
-              <Icon name="bell" size={16} />
-              {unreadCount(notifItems, notifSeen) > 0 && (
-                <span className="bell-badge">{unreadCount(notifItems, notifSeen)}</span>
+          {isAdmin && (
+            <div className="bell-wrap">
+              <button className="bell-btn" onClick={() => setShowNotif((s) => !s)} title={t("app.notifications")}>
+                <Icon name="bell" size={16} />
+                {unreadCount(notifItems, notifSeen) > 0 && (
+                  <span className="bell-badge">{unreadCount(notifItems, notifSeen)}</span>
+                )}
+              </button>
+              {showNotif && (
+                <NotificationsPop
+                  items={notifItems}
+                  seen={notifSeen}
+                  onClose={() => setShowNotif(false)}
+                  onLoaded={setNotifItems}
+                  onOpenReport={openReport}
+                  onSelectObject={openObjectDetail}
+                  onSeenChange={setNotifSeen}
+                />
               )}
-            </button>
-            {showNotif && (
-              <NotificationsPop
-                items={notifItems}
-                onClose={() => setShowNotif(false)}
-                onLoaded={setNotifItems}
-                onOpenReport={openReport}
-                onSelectObject={openObjectDetail}
-                onMarkAll={(iso) => {
-                  saveNotifSeen(iso);
-                  setNotifSeen(iso);
-                }}
-              />
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {content}
@@ -365,6 +425,7 @@ const App = () => {
             } catch {
               setNextId(1);
             }
+            setEditingProject(null);
             setShowNewObj(true);
           }}
           title={t("app.newObject")}
@@ -376,15 +437,23 @@ const App = () => {
 
       {showNewObj && (
         <NewObjectModal
+          key={editingProject?.id || "new"}
           nextId={nextId}
           busy={creating}
-          onClose={() => setShowNewObj(false)}
+          project={editingProject}
+          onClose={closeNewObject}
           onSave={async (payload) => {
             setCreating(true);
             try {
-              const created = await createProject(payload);
-              setShowNewObj(false);
-              setSavedToast(t("app.objectAdded", { id: created.id, client: created.client || created.name }));
+              if (editingProject?.id) {
+                const saved = await updateProject(editingProject.id, payload);
+                closeNewObject();
+                setSavedToast(t("app.objectUpdated", { id: saved.id, client: saved.client || saved.name }));
+              } else {
+                const created = await createProject(payload);
+                closeNewObject();
+                setSavedToast(t("app.objectAdded", { id: created.id, client: created.client || created.name }));
+              }
               setTimeout(() => setSavedToast(null), 2600);
               setRev((r) => r + 1);
             } finally {

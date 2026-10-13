@@ -13,7 +13,7 @@ import {
   ymd,
 } from "./cal-settings";
 import { createJob, fetchCalendarSettings, fetchJobs, fetchProjects, fetchUsers, saveCalendarSettings } from "./api";
-import { assigneeNames } from "./assignees";
+import { assigneeNames, projectAssignees, workerUsers } from "./assignees";
 import { useI18n } from "./i18n";
 
 const PALETTE = ["#2C5F2E", "#5B7DB1", "#F4A442", "#A66A8E", "#6E5B8A", "#7A8B5C", "#B85C5C", "#5C8B8B"];
@@ -39,6 +39,9 @@ const buildWorkerColors = (users, jobs) => {
   (jobs || []).forEach((job) => {
     const person = job.assigned_to;
     if (person?.id && !people.has(Number(person.id))) people.set(Number(person.id), person);
+    projectAssignees(job.project).forEach((assignee) => {
+      if (assignee?.id && !people.has(Number(assignee.id))) people.set(Number(assignee.id), assignee);
+    });
   });
   const sorted = [...people.values()].sort((a, b) => Number(a.id) - Number(b.id));
   const map = new Map();
@@ -66,6 +69,14 @@ const groupJobsByProject = (dayJobs) => {
     if (worker?.id && !group.workers.some((person) => Number(person.id) === Number(worker.id))) {
       group.workers.push(worker);
     }
+  });
+  groups.forEach((group) => {
+    projectAssignees(group.project).forEach((person) => {
+      if (person?.id && !group.workers.some((other) => Number(other.id) === Number(person.id))) {
+        group.workers.push(person);
+      }
+    });
+    group.workers.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
   });
   return [...groups.values()];
 };
@@ -145,7 +156,7 @@ const CalendarView = ({ user, onSelectObject }) => {
     ]);
     setJobs(jobRows);
     setProjects(projectRows);
-    setUsers((Array.isArray(people) ? people : []).filter((u) => u.is_active !== false));
+    setUsers(workerUsers(Array.isArray(people) ? people : []));
     if (cal) setSettings(settingsFromApi(cal));
   };
 
@@ -179,16 +190,15 @@ const CalendarView = ({ user, onSelectObject }) => {
   };
 
   const workerOptions = useMemo(() => {
-    const people = users.length ? users : [user];
     return [
       { id: "all", label: t("calendar.allWorkers") },
-      ...people.map((person) => ({
+      ...users.map((person) => ({
         id: person.id,
         label: person.name,
         sub: person.initials,
       })),
     ];
-  }, [users, user, t]);
+  }, [users, t]);
 
   const projectOptions = useMemo(
     () => [
@@ -227,6 +237,17 @@ const CalendarView = ({ user, onSelectObject }) => {
           color: colorForWorker(worker.id),
         });
       }
+      projectAssignees(project).forEach((person) => {
+        if (person?.id && !seenW.has(person.id)) {
+          seenW.add(person.id);
+          workersSeen.push({
+            key: `w-${person.id}`,
+            label: person.name,
+            initials: person.initials,
+            color: colorForWorker(person.id),
+          });
+        }
+      });
     });
     return {
       projects: projectsSeen.slice(0, 8),
@@ -256,11 +277,6 @@ const CalendarView = ({ user, onSelectObject }) => {
           {isAdmin && (
             <button className="btn btn-ghost" onClick={() => setShowSettings(true)}>
               <Icon name="settings" size={15} /> {t("calendar.settings")}
-            </button>
-          )}
-          {isAdmin && (
-            <button className="btn btn-primary" onClick={() => openAdd(null)}>
-              <Icon name="plus" size={15} /> {t("calendar.newEntry")}
             </button>
           )}
         </div>
@@ -417,7 +433,7 @@ const CalendarView = ({ user, onSelectObject }) => {
           jobs={jobs}
           settings={settings}
           initialDate={selectedDate}
-          initialWorkerId={workerFilter !== "all" ? workerFilter : user.id}
+          initialWorkerId={workerFilter !== "all" ? workerFilter : users[0]?.id}
           initialProjectId={projectFilter !== "all" ? projectFilter : undefined}
           onClose={() => setShowAdd(false)}
           onCreated={async () => {
@@ -459,7 +475,7 @@ const AddJobModal = ({ user, isAdmin, projects, users, jobs, settings, initialDa
   const [endDate, setEndDate] = useState(initialDate || ymd(new Date()));
   const [time, setTime] = useState(settings.workStart || "08:00");
   const [endTime, setEndTime] = useState(settings.workEnd || "17:00");
-  const [assignedTo, setAssignedTo] = useState(initialWorkerId || user.id);
+  const [assignedTo, setAssignedTo] = useState(initialWorkerId || users[0]?.id || "");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 

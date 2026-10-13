@@ -6,7 +6,7 @@ const Sidebar = ({ user, currentSection, onNavigate, onLogout, mobileOpen, onClo
   const { t } = useI18n();
   const isAdmin = user.role === "ADMINISTRATORS";
   const items = [
-    { id: "dashboard", label: t("nav.dashboard"), icon: "chart", adminOnly: true },
+    { id: "dashboard", label: t("nav.dashboard"), icon: "chart" },
     { id: "calendar", label: t("nav.calendar"), icon: "calendar" },
     { id: "tools", label: t("nav.tools"), icon: "wrench" },
     { id: "warehouses", label: t("nav.warehouses"), icon: "warehouse" },

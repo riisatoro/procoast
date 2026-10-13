@@ -13,6 +13,7 @@ from .models import (
     Job,
     Material,
     MaterialSpending,
+    NotificationRead,
     Project,
     ProjectMaterial,
     ProjectTask,
@@ -202,6 +203,12 @@ class ActivityLogAdmin(admin.ModelAdmin):
     list_display = ("created_at", "user", "action", "entity_type", "entity_id", "summary")
     list_filter = ("entity_type", "action")
     search_fields = ("summary", "entity_type", "action")
+
+
+@admin.register(NotificationRead)
+class NotificationReadAdmin(admin.ModelAdmin):
+    list_display = ("read_at", "user", "notification_key")
+    search_fields = ("notification_key", "user__username", "user__name")
 
 
 class CoatingSystemLayerInline(admin.TabularInline):

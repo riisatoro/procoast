@@ -15,6 +15,24 @@ const placePop = (anchor) => {
 const ymd = (y, m, d) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 const lastDay = (y, m) => new Date(y, m, 0).getDate();
 
+const localToday = () => {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+};
+
+const fmtDate = (d) => ymd(d.getFullYear(), d.getMonth() + 1, d.getDate());
+
+const yearFromValue = (value) => {
+  const y = Number(String(value?.from || "").slice(0, 4));
+  return y || localToday().getFullYear();
+};
+
+const quarterBounds = (y, q) => {
+  const startM = (q - 1) * 3 + 1;
+  const endM = startM + 2;
+  return { from: ymd(y, startM, 1), to: ymd(y, endM, lastDay(y, endM)) };
+};
+
 export const formatPeriod = (from, to, tr) => {
   if (!from || !to) return tr("period.pick");
   const months = tr("months");
@@ -30,9 +48,9 @@ const PeriodPicker = ({ value, onChange }) => {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState("month");
-  const [year, setYear] = useState(2026);
-  const [customFrom, setCustomFrom] = useState(value?.from || "2026-05-01");
-  const [customTo, setCustomTo] = useState(value?.to || "2026-05-31");
+  const [year, setYear] = useState(() => yearFromValue(value));
+  const [customFrom, setCustomFrom] = useState(value?.from || fmtDate(localToday()));
+  const [customTo, setCustomTo] = useState(value?.to || fmtDate(localToday()));
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const ref = useRef(null);
   const popRef = useRef(null);
@@ -64,13 +82,20 @@ const PeriodPicker = ({ value, onChange }) => {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+    setYear(yearFromValue(value));
+    if (value?.from) setCustomFrom(value.from);
+    if (value?.to) setCustomTo(value.to);
+  }, [open, value?.from, value?.to]);
+
   const pickMonth = (y, m) => {
     onChange({ from: ymd(y, m, 1), to: ymd(y, m, lastDay(y, m)), label: `${months[m - 1]} ${y}` });
     setOpen(false);
   };
   const pickQuarter = (y, q) => {
-    const startM = (q - 1) * 3 + 1, endM = startM + 2;
-    onChange({ from: ymd(y, startM, 1), to: ymd(y, endM, lastDay(y, endM)), label: `Q${q} ${y}` });
+    const range = quarterBounds(y, q);
+    onChange({ ...range, label: `Q${q} ${y}` });
     setOpen(false);
   };
   const pickYear = (y) => {
@@ -78,19 +103,23 @@ const PeriodPicker = ({ value, onChange }) => {
     setOpen(false);
   };
   const pickPreset = (key) => {
-    const today = new Date(2026, 4, 6);
-    const fmt = (d) => ymd(d.getFullYear(), d.getMonth() + 1, d.getDate());
-    const sub = (n) => { const d = new Date(today); d.setDate(d.getDate() - n); return d; };
+    const today = localToday();
+    const sub = (n) => {
+      const d = new Date(today);
+      d.setDate(d.getDate() - n);
+      return d;
+    };
     let r;
-    if (key === "today") r = { from: fmt(today), to: fmt(today), label: t("period.today") };
-    if (key === "7") r = { from: fmt(sub(6)), to: fmt(today), label: t("period.last7") };
-    if (key === "30") r = { from: fmt(sub(29)), to: fmt(today), label: t("period.last30") };
-    if (key === "90") r = { from: fmt(sub(89)), to: fmt(today), label: t("period.last90") };
-    if (key === "ytd") r = { from: ymd(today.getFullYear(), 1, 1), to: fmt(today), label: t("period.ytd", { y: today.getFullYear() }) };
-    onChange(r); setOpen(false);
+    if (key === "today") r = { from: fmtDate(today), to: fmtDate(today), label: t("period.today") };
+    if (key === "7") r = { from: fmtDate(sub(6)), to: fmtDate(today), label: t("period.last7") };
+    if (key === "30") r = { from: fmtDate(sub(29)), to: fmtDate(today), label: t("period.last30") };
+    if (key === "90") r = { from: fmtDate(sub(89)), to: fmtDate(today), label: t("period.last90") };
+    if (key === "ytd") r = { from: ymd(today.getFullYear(), 1, 1), to: fmtDate(today), label: t("period.ytd", { y: today.getFullYear() }) };
+    if (r) onChange(r);
+    setOpen(false);
   };
   const applyCustom = () => {
-    if (customFrom > customTo) return;
+    if (!customFrom || !customTo || customFrom > customTo) return;
     onChange({ from: customFrom, to: customTo, label: formatPeriod(customFrom, customTo, t) });
     setOpen(false);
   };
@@ -135,12 +164,16 @@ const PeriodPicker = ({ value, onChange }) => {
 
           {tab === "quarter" && (
             <div className="pp-quarter-grid">
-              {[1, 2, 3, 4].map((q) => (
-                <button key={q} className="pp-quarter" onClick={() => pickQuarter(year, q)}>
-                  <div className="pp-q-name mono">Q{q}</div>
-                  <div className="pp-q-months">{monthsShort[(q - 1) * 3]}–{monthsShort[(q - 1) * 3 + 2]}</div>
-                </button>
-              ))}
+              {[1, 2, 3, 4].map((q) => {
+                const range = quarterBounds(year, q);
+                const isActive = value?.from === range.from && value?.to === range.to;
+                return (
+                  <button key={q} className={`pp-quarter ${isActive ? "on" : ""}`} onClick={() => pickQuarter(year, q)}>
+                    <div className="pp-q-name mono">Q{q}</div>
+                    <div className="pp-q-months">{monthsShort[(q - 1) * 3]}–{monthsShort[(q - 1) * 3 + 2]}</div>
+                  </button>
+                );
+              })}
             </div>
           )}
 
@@ -164,7 +197,9 @@ const PeriodPicker = ({ value, onChange }) => {
                 <span>{t("period.to")}</span>
                 <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
               </label>
-              <button className="btn btn-primary pp-apply" onClick={applyCustom}>{t("period.apply")}</button>
+              <button className="btn btn-primary pp-apply" onClick={applyCustom} disabled={!customFrom || !customTo || customFrom > customTo}>
+                {t("period.apply")}
+              </button>
             </div>
           )}
         </div>,

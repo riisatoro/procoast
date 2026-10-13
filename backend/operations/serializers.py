@@ -30,6 +30,48 @@ from .models import (
 )
 
 User = get_user_model()
+ZERO = Decimal("0")
+
+
+def _as_dec(value):
+    try:
+        return Decimal(str(value or 0))
+    except (ArithmeticError, TypeError, ValueError):
+        return ZERO
+
+
+def material_needed_qty(obj):
+    annotated = getattr(obj, "needed_qty", None)
+    if annotated is not None:
+        return _as_dec(annotated)
+    total = ZERO
+    for row in obj.project_needs.all():
+        project = getattr(row, "project", None)
+        if project is not None and project.status in Project.ARCHIVED_STATUSES:
+            continue
+        total += _as_dec(row.quantity_needed)
+    return total
+
+
+def material_spent_qty(obj):
+    annotated = getattr(obj, "spent_qty", None)
+    if annotated is not None:
+        return _as_dec(annotated)
+    total = ZERO
+    for row in obj.spendings.all():
+        project = getattr(row, "project", None)
+        if project is not None and project.status in Project.ARCHIVED_STATUSES:
+            continue
+        total += _as_dec(row.quantity)
+    return total
+
+
+def material_reserved_qty(obj):
+    return max(ZERO, material_needed_qty(obj) - material_spent_qty(obj))
+
+
+def material_available_qty(obj):
+    return max(ZERO, _as_dec(obj.stock) - material_reserved_qty(obj))
 
 
 class UserBriefSerializer(serializers.ModelSerializer):
@@ -72,6 +114,8 @@ class MaterialSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    reserved = serializers.SerializerMethodField()
+    available = serializers.SerializerMethodField()
 
     class Meta:
         model = Material
@@ -85,6 +129,8 @@ class MaterialSerializer(serializers.ModelSerializer):
             "warehouse_name",
             "warehouse_location",
             "stock",
+            "reserved",
+            "available",
             "linked_projects",
             "project",
             "quantity_needed",
@@ -108,6 +154,12 @@ class MaterialSerializer(serializers.ModelSerializer):
                 }
             )
         return result
+
+    def get_reserved(self, obj):
+        return str(material_reserved_qty(obj).quantize(Decimal("0.01")))
+
+    def get_available(self, obj):
+        return str(material_available_qty(obj).quantize(Decimal("0.01")))
 
     def validate(self, attrs):
         if self.instance is None and not attrs.get("project"):
@@ -268,10 +320,25 @@ class ToolCheckItemSerializer(serializers.Serializer):
 
 class ProjectMaterialSerializer(serializers.ModelSerializer):
     material_detail = MaterialSerializer(source="material", read_only=True)
+    warehouse = serializers.PrimaryKeyRelatedField(
+        queryset=Warehouse.objects.all(),
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = ProjectMaterial
-        fields = ("id", "material", "material_detail", "quantity_needed")
+        fields = ("id", "material", "material_detail", "quantity_needed", "warehouse")
+
+    def validate(self, attrs):
+        warehouse = attrs.pop("warehouse", None)
+        material = attrs.get("material")
+        if warehouse is not None and material is not None and material.warehouse_id != warehouse.id:
+            raise serializers.ValidationError(
+                {"warehouse": "Materiāls nav šajā noliktavā."}
+            )
+        return attrs
 
 
 class ExpenseSerializer(serializers.ModelSerializer):

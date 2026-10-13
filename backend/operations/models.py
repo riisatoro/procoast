@@ -432,6 +432,22 @@ class ActivityLog(models.Model):
         ]
 
 
+class NotificationRead(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notification_reads",
+    )
+    notification_key = models.CharField(max_length=80)
+    read_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "notification_key")
+
+    def __str__(self):
+        return f"{self.user_id}:{self.notification_key}"
+
+
 class CoatingSystem(models.Model):
     code = models.CharField(max_length=16, unique=True)
     name = models.CharField(max_length=200)

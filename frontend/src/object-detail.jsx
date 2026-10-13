@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Icon from "./icons";
-import { fetchJobs, fetchProject, fetchReports } from "./api";
+import { fetchJobs, fetchProject, fetchReports, purgeProject } from "./api";
 import { STATUS_LABEL, statusClass } from "./projects";
 import { assigneeNames, projectAssignees } from "./assignees";
 import { useI18n } from "./i18n";
@@ -10,12 +10,14 @@ const PALETTE = ["#2C5F2E", "#5B7DB1", "#F4A442", "#A66A8E", "#6E5B8A", "#7A8B5C
 const num = (v) => Number(v || 0);
 const day = (iso) => (iso ? String(iso).slice(0, 10) : "");
 
-const ObjectDetail = ({ objectId, onBack, onNavigate, onOpenReport }) => {
+const ObjectDetail = ({ user, objectId, onBack, onNavigate, onOpenReport, onEdit }) => {
   const { t } = useI18n();
   const [project, setProject] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [reports, setReports] = useState([]);
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const isAdmin = user?.role === "ADMINISTRATORS";
 
   useEffect(() => {
     let cancelled = false;
@@ -98,6 +100,23 @@ const ObjectDetail = ({ objectId, onBack, onNavigate, onOpenReport }) => {
     return items;
   }, [project, jobs, t, today]);
 
+  const archived = project?.status === "closed" || project?.status === "deleted";
+
+  const purge = async () => {
+    const client = project.client || project.name;
+    if (!window.confirm(t("archive.purgeConfirm", { id: project.id, client }))) return;
+    setBusy(true);
+    setErr("");
+    try {
+      await purgeProject(project.id);
+      onBack();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!project) {
     return <div className="page"><section className="card muted">{err || t("common.loading")}</section></div>;
   }
@@ -121,12 +140,22 @@ const ObjectDetail = ({ objectId, onBack, onNavigate, onOpenReport }) => {
           )}
         </div>
         <div className="page-actions">
+          {isAdmin && !archived && onEdit && (
+            <button className="btn btn-primary" onClick={() => onEdit(project)}>
+              <Icon name="edit" size={15} /> {t("common.edit")}
+            </button>
+          )}
           <button className="btn btn-ghost" onClick={() => onNavigate("reports")}>
             <Icon name="clipboard" size={15} /> {t("object.report")}
           </button>
           <button className="btn btn-outline" onClick={() => onNavigate("materials")}>
             <Icon name="package" size={15} /> {t("object.materials")}
           </button>
+          {isAdmin && archived && (
+            <button className="btn btn-danger" disabled={busy} onClick={purge}>
+              <Icon name="trash" size={15} /> {t("archive.purge")}
+            </button>
+          )}
         </div>
       </header>
 

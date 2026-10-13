@@ -40,6 +40,7 @@ HEADERS = {
             "Objekts ID",
             "Objekts",
             "Klients",
+            "Sistēma",
         ],
         "m2": [
             "Gads",
@@ -49,6 +50,7 @@ HEADERS = {
             "Objekts ID",
             "Objekts",
             "Klients",
+            "Sistēma",
             "m²",
         ],
     },
@@ -71,6 +73,7 @@ HEADERS = {
             "Site ID",
             "Site",
             "Client",
+            "System",
         ],
         "m2": [
             "Year",
@@ -80,6 +83,7 @@ HEADERS = {
             "Site ID",
             "Site",
             "Client",
+            "System",
             "m²",
         ],
     },
@@ -243,6 +247,7 @@ def _hours_rows(start_date, end_date, user_ids):
                         project.id,
                         project.name,
                         project.client or "",
+                        project.system or "",
                     ]
                 )
             day += timedelta(days=1)
@@ -279,6 +284,7 @@ def _m2_rows(start_date, end_date, user_ids):
                 "project_id": project.id,
                 "project": project.name,
                 "client": project.client or "",
+                "system": project.system or "",
                 "m2": Decimal("0"),
             }
         totals[key]["m2"] += qty
@@ -293,6 +299,7 @@ def _m2_rows(start_date, end_date, user_ids):
                 item["project_id"],
                 item["project"],
                 item["client"],
+                item["system"],
                 str(item["m2"].quantize(Decimal("0.01"))),
             ]
         )

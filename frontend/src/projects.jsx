@@ -244,7 +244,7 @@ const ProjectForm = ({ users, onClose, onSave }) => {
   );
 };
 
-const ProjectDetail = ({ user, projectId, onBack, readOnly }) => {
+const ProjectDetail = ({ user, projectId, onBack, onEdit, readOnly }) => {
   const { t, dateLocale } = useI18n();
   const [project, setProject] = useState(null);
   const [materials, setMaterials] = useState([]);
@@ -358,6 +358,11 @@ const ProjectDetail = ({ user, projectId, onBack, readOnly }) => {
         </div>
         <div className="page-actions">
           <span className={`status ${statusClass(project.status)}`}>{t(STATUS_LABEL[project.status])}</span>
+          {isAdmin && !closed && onEdit && (
+            <button className="btn btn-outline" onClick={() => onEdit(project)}>
+              <Icon name="edit" size={15} /> {t("common.edit")}
+            </button>
+          )}
           {!closed && (
             <>
               <button className="btn btn-ghost" onClick={() => run(() => setProjectStatus(project.id, "in_progress"), t("projects.toastInProgress"))}>
@@ -672,7 +677,7 @@ const ProjectDetail = ({ user, projectId, onBack, readOnly }) => {
   );
 };
 
-const ProjectsPage = ({ user }) => {
+const ProjectsPage = ({ user, onEditProject }) => {
   const { t } = useI18n();
   const [items, setItems] = useState([]);
   const [users, setUsers] = useState([]);
@@ -701,6 +706,7 @@ const ProjectsPage = ({ user }) => {
       <ProjectDetail
         user={user}
         projectId={selected}
+        onEdit={isAdmin ? onEditProject : undefined}
         onBack={() => {
           setSelected(null);
           load().catch(() => {});

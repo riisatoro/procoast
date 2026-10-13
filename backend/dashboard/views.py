@@ -11,7 +11,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import IsAdminType
 from operations.models import (
     ActivityLog,
     DailyReport,
@@ -41,6 +40,46 @@ def _dec(value):
     if value is None:
         return "0"
     return str(value)
+
+
+def _local_date(value):
+    if value is None:
+        return None
+    if timezone.is_aware(value):
+        return timezone.localtime(value).date()
+    return value.date() if hasattr(value, "date") else value
+
+
+def _jobs_in_period(start_date, end_date):
+    return Job.objects.filter(starts_at__date__lte=end_date).filter(
+        Q(ends_at__date__gte=start_date)
+        | Q(ends_at__isnull=True, starts_at__date__gte=start_date)
+    )
+
+
+def _job_card(job):
+    person = job.assigned_to
+    start = _local_date(job.starts_at)
+    end = _local_date(job.ends_at) or start
+    return {
+        "id": job.id,
+        "project_id": job.project_id,
+        "object_id": job.project_id,
+        "project": job.project.name,
+        "project_name": job.project.name,
+        "client": job.project.client,
+        "address": job.project.address,
+        "system": job.project.system,
+        "color": job.project.color,
+        "assigned_to": person.name if person else "",
+        "worker_name": person.name if person else "",
+        "worker": person.initials if person else "",
+        "initials": person.initials if person else "",
+        "starts_at": job.starts_at.isoformat(),
+        "ends_at": job.ends_at.isoformat() if job.ends_at else None,
+        "work_date": start.isoformat() if start else None,
+        "end_date": end.isoformat() if end else None,
+    }
 
 
 def _period_bounds(from_s, to_s):
@@ -107,7 +146,7 @@ class DashboardView(APIView):
 
 
 class DashboardStatsView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminType]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         start_date, end_date, start, end = _period_bounds(
@@ -115,7 +154,6 @@ class DashboardStatsView(APIView):
             request.query_params.get("to"),
         )
         prev_start, prev_end = _prev_bounds(start_date, end_date)
-        today = timezone.localdate()
         active_statuses = (
             Project.Status.OPEN,
             Project.Status.IN_PROGRESS,
@@ -141,8 +179,8 @@ class DashboardStatsView(APIView):
             MaterialSpending.objects.filter(created_at__range=(start, end)),
             "quantity",
         )
-        jobs_now = Job.objects.filter(starts_at__range=(start, end)).count()
-        jobs_prev = Job.objects.filter(starts_at__range=(prev_start, prev_end)).count()
+        jobs_now = _jobs_in_period(start_date, end_date).count()
+        jobs_prev = _jobs_in_period(prev_start.date(), prev_end.date()).count()
         closed_in_period = Project.objects.filter(
             status=Project.Status.CLOSED, closed_at__range=(start, end)
         ).count()
@@ -280,32 +318,18 @@ class DashboardStatsView(APIView):
         ever_m2 += deleted_m2 or Decimal("0")
         avg_progress = int((done_m2 / total_m2 * 100).quantize(Decimal("1"))) if total_m2 else 0
 
-        today_jobs = []
-        for job in (
-            Job.objects.filter(
-                Q(starts_at__date=today)
-                | Q(starts_at__date__lte=today, ends_at__date__gte=today)
+        period_jobs = [
+            _job_card(job)
+            for job in (
+                _jobs_in_period(start_date, end_date)
+                .select_related("project", "assigned_to")
+                .order_by("starts_at", "id")[:200]
             )
-            .select_related("project", "assigned_to")
-            .order_by("starts_at")[:12]
-        ):
-            person = job.assigned_to
-            today_jobs.append(
-                {
-                    "id": job.id,
-                    "project_id": job.project_id,
-                    "project": job.project.name,
-                    "client": job.project.client,
-                    "assigned_to": person.name if person else "",
-                    "initials": person.initials if person else "",
-                    "starts_at": job.starts_at.isoformat(),
-                    "ends_at": job.ends_at.isoformat() if job.ends_at else None,
-                }
-            )
+        ]
 
         today_reports = []
         for report in (
-            DailyReport.objects.filter(work_date=today)
+            DailyReport.objects.filter(work_date__range=(start_date, end_date))
             .select_related("project", "recorded_by")
             .prefetch_related("task_lines__task", "material_lines__material")
             .order_by("-updated_at")[:12]
@@ -407,7 +431,8 @@ class DashboardStatsView(APIView):
                     "tools_available": _dec(tool_available),
                 },
                 "material_usage": material_usage[:8],
-                "today_jobs": today_jobs,
+                "period_jobs": period_jobs,
+                "today_jobs": period_jobs,
                 "today_reports": today_reports,
                 "activity": ActivityLogSerializer(activity, many=True).data,
             }

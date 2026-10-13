@@ -1,16 +1,36 @@
 import { t } from "./i18n";
 
 const API = import.meta.env.VITE_API_URL || "";
+const ACCESS_KEY = "access";
+const REFRESH_KEY = "refresh";
+const USER_KEY = "procoast-user";
 
 const unauthorizedListeners = new Set();
+let refreshInFlight = null;
 
 export function getToken() {
-  return localStorage.getItem("access");
+  return localStorage.getItem(ACCESS_KEY);
+}
+
+export function getStoredUser() {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeUser(user) {
+  if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
 export function clearSession() {
-  localStorage.removeItem("access");
-  localStorage.removeItem("refresh");
+  localStorage.removeItem(ACCESS_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+  localStorage.removeItem(USER_KEY);
 }
 
 export function onUnauthorized(listener) {
@@ -23,17 +43,50 @@ function handleUnauthorized() {
   unauthorizedListeners.forEach((listener) => listener());
 }
 
-export async function api(path, options = {}) {
+function isAuthPath(path) {
+  const value = String(path);
+  return value.includes("/api/auth/login/") || value.includes("/api/auth/refresh/");
+}
+
+function buildHeaders(options = {}) {
   const headers = { ...(options.headers || {}) };
   if (options.body && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${API}${path}`, { ...options, headers });
-  const isLogin = String(path).includes("/api/auth/login/");
-  if (!isLogin && (res.status === 401 || res.status === 403)) {
-    handleUnauthorized();
+  return headers;
+}
+
+async function refreshAccessToken() {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    const refresh = localStorage.getItem(REFRESH_KEY);
+    if (!refresh) return false;
+    const res = await fetch(`${API}/api/auth/refresh/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.access) return false;
+    localStorage.setItem(ACCESS_KEY, data.access);
+    if (data.refresh) localStorage.setItem(REFRESH_KEY, data.refresh);
+    return true;
+  })().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
+export async function api(path, options = {}) {
+  let res = await fetch(`${API}${path}`, { ...options, headers: buildHeaders(options) });
+  if (res.status === 401 && !isAuthPath(path)) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      res = await fetch(`${API}${path}`, { ...options, headers: buildHeaders(options) });
+    }
+    if (res.status === 401) handleUnauthorized();
   }
   return res;
 }
@@ -47,15 +100,18 @@ export async function loginRequest(login, password) {
   if (!res.ok) {
     throw new Error(data.detail || t("api.loginFailed"));
   }
-  localStorage.setItem("access", data.access);
-  localStorage.setItem("refresh", data.refresh);
+  localStorage.setItem(ACCESS_KEY, data.access);
+  localStorage.setItem(REFRESH_KEY, data.refresh);
+  storeUser(data.user);
   return data.user;
 }
 
 export async function fetchMe() {
   const res = await api("/api/auth/me/");
   if (!res.ok) return null;
-  return res.json();
+  const me = await res.json();
+  storeUser(me);
+  return me;
 }
 
 export async function fetchDashboardStats(from, to) {
@@ -210,6 +266,8 @@ export const updateReport = (id, payload) =>
 export const deleteReport = (id) =>
   jsonCall(`/api/reports/${id}/`, { method: "DELETE" }, t("api.deleteReport"));
 export const fetchNotifications = () => jsonCall("/api/notifications/", {}, t("api.loadNotif"));
+export const markNotificationsRead = (payload) =>
+  jsonCall("/api/notifications/mark-read/", { method: "POST", body: JSON.stringify(payload) }, t("api.markNotif"));
 export const fetchActivity = (userId) =>
   jsonCall(`/api/activity/${userId ? `?user=${userId}` : ""}`, {}, t("api.loadLog"));
 

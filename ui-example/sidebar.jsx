@@ -2,7 +2,7 @@
 const Sidebar = ({ user, currentSection, onNavigate, onLogout, mobileOpen, onCloseMobile, onOpenProfile }) => {
   const isAdmin = user.role === "ADMINISTRATORS";
   const items = [
-    { id: "dashboard", label: "Dashboard", icon: "chart", adminOnly: true },
+    { id: "dashboard", label: "Sākums", icon: "chart", adminOnly: true },
     { id: "calendar", label: "Kalendārs", icon: "calendar" },
     { id: "tools", label: "Instrumenti", icon: "wrench" },
     { id: "materials", label: "Materiāls", icon: "package" },

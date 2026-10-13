@@ -1,3 +1,4 @@
+from datetime import datetime, time
 from decimal import Decimal
 
 from django.db import transaction
@@ -25,6 +26,7 @@ from .models import (
     Job,
     Material,
     MaterialSpending,
+    NotificationRead,
     Project,
     ProjectMaterial,
     ProjectTask,
@@ -53,6 +55,8 @@ from .serializers import (
     ToolSerializer,
     ToolTypeSerializer,
     WarehouseSerializer,
+    material_available_qty,
+    material_reserved_qty,
 )
 
 
@@ -108,6 +112,74 @@ def get_or_create_material(user, name, color="", unit="kg", per_m2=None):
     )
 
 
+def material_from_row(user, row):
+    raw_id = row.get("material") or row.get("material_id")
+    material = None
+    if raw_id not in (None, ""):
+        try:
+            material = Material.objects.filter(pk=int(raw_id)).first()
+        except (TypeError, ValueError):
+            material = None
+    per_m2 = row.get("per_m2")
+    try:
+        per_m2 = Decimal(str(per_m2)) if per_m2 not in (None, "") else None
+    except (ArithmeticError, TypeError, ValueError):
+        per_m2 = None
+    name = str(row.get("name") or "").strip()
+    if material is None:
+        if not name:
+            return None
+        return get_or_create_material(
+            user,
+            name,
+            color=str(row.get("color") or ""),
+            unit=str(row.get("unit") or "kg"),
+            per_m2=per_m2,
+        )
+    updates = []
+    if per_m2 is not None and material.per_m2 != per_m2:
+        material.per_m2 = per_m2
+        updates.append("per_m2")
+    if updates:
+        material.save(update_fields=updates + ["updated_at"])
+    return material
+
+
+def assign_project_material(project, material, qty, *, replace=False):
+    try:
+        qty = Decimal(str(qty))
+    except (ArithmeticError, TypeError, ValueError):
+        qty = Decimal("0")
+    if qty <= 0 or material is None:
+        return None
+    existing = ProjectMaterial.objects.filter(project=project, material=material).first()
+    current = existing.quantity_needed if existing else Decimal("0")
+    new_qty = qty if replace else current + qty
+    extra = new_qty - current
+    if extra > 0:
+        available = material_available_qty(material)
+        if extra > available and (material.stock > 0 or available > 0):
+            reserved = material_reserved_qty(material)
+            raise ValidationError(
+                {
+                    "quantity_needed": [
+                        f"Pieejams tikai {available} {material.unit} "
+                        f"(krājums {material.stock}, rezervēts {reserved})."
+                    ]
+                }
+            )
+    if existing:
+        if existing.quantity_needed != new_qty:
+            existing.quantity_needed = new_qty
+            existing.save(update_fields=["quantity_needed"])
+        return existing
+    return ProjectMaterial.objects.create(
+        project=project,
+        material=material,
+        quantity_needed=new_qty,
+    )
+
+
 def apply_project_blueprint(project, user, tasks_payload, materials_payload):
     if tasks_payload:
         for index, row in enumerate(tasks_payload):
@@ -141,35 +213,69 @@ def apply_project_blueprint(project, user, tasks_payload, materials_payload):
     if not materials_payload:
         return
     for row in materials_payload:
-        name = str(row.get("name") or "").strip()
-        if not name:
-            continue
         try:
             qty = Decimal(str(row.get("quantity_needed") or row.get("needed") or 0))
         except (ArithmeticError, TypeError, ValueError):
             qty = Decimal("0")
         if qty <= 0:
             continue
-        per_m2 = row.get("per_m2")
+        material = material_from_row(user, row)
+        assign_project_material(project, material, qty, replace=False)
+
+
+def sync_project_blueprint(project, user, tasks_payload, materials_payload):
+    if tasks_payload is not None:
+        keep = set()
+        for index, row in enumerate(tasks_payload):
+            name = str(row.get("name") or "").strip()
+            if not name:
+                continue
+            try:
+                total = Decimal(str(row.get("quantity_total") or row.get("total") or 0))
+            except (ArithmeticError, TypeError, ValueError):
+                total = Decimal("0")
+            if total <= 0 and project.total_m2:
+                total = project.total_m2
+            if total <= 0:
+                continue
+            unit = str(row.get("unit") or "m²")
+            task = project.tasks.filter(name=name).first()
+            if task:
+                task.unit = unit
+                task.quantity_total = total
+                task.sort_order = index
+                task.save(update_fields=["unit", "quantity_total", "sort_order"])
+            else:
+                task = ProjectTask.objects.create(
+                    project=project,
+                    name=name,
+                    unit=unit,
+                    quantity_total=total,
+                    sort_order=index,
+                )
+            keep.add(task.id)
+        for task in project.tasks.exclude(id__in=keep):
+            if not task.report_lines.exists():
+                task.delete()
+
+    if materials_payload is None:
+        return
+    keep_materials = set()
+    for row in materials_payload:
         try:
-            per_m2 = Decimal(str(per_m2)) if per_m2 not in (None, "") else None
+            qty = Decimal(str(row.get("quantity_needed") or row.get("needed") or 0))
         except (ArithmeticError, TypeError, ValueError):
-            per_m2 = None
-        material = get_or_create_material(
-            user,
-            name,
-            color=str(row.get("color") or ""),
-            unit=str(row.get("unit") or "kg"),
-            per_m2=per_m2,
-        )
-        existing, created = ProjectMaterial.objects.get_or_create(
-            project=project,
-            material=material,
-            defaults={"quantity_needed": qty},
-        )
-        if not created:
-            existing.quantity_needed = existing.quantity_needed + qty
-            existing.save(update_fields=["quantity_needed"])
+            qty = Decimal("0")
+        if qty <= 0:
+            continue
+        material = material_from_row(user, row)
+        if material is None:
+            continue
+        existing = assign_project_material(project, material, qty, replace=True)
+        if existing:
+            keep_materials.add(existing.id)
+    for row in project.needed_materials.exclude(id__in=keep_materials):
+        row.delete()
 
 
 def release_open_tools(project, user):
@@ -190,6 +296,11 @@ class WarehouseViewSet(
     queryset = Warehouse.objects.all()
     serializer_class = WarehouseSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ("create", "update", "partial_update"):
+            return [IsAuthenticated(), IsAdminType()]
+        return [IsAuthenticated()]
 
     def perform_create(self, serializer):
         warehouse = serializer.save(created_by=self.request.user)
@@ -221,10 +332,16 @@ class MaterialViewSet(
     viewsets.GenericViewSet,
 ):
     queryset = Material.objects.select_related("warehouse", "created_by").prefetch_related(
-        "project_needs__project"
+        "project_needs__project",
+        "spendings__project",
     )
     serializer_class = MaterialSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ("create", "update", "partial_update"):
+            return [IsAuthenticated(), IsAdminType()]
+        return [IsAuthenticated()]
 
     def perform_create(self, serializer):
         material = serializer.save(created_by=self.request.user)
@@ -330,6 +447,102 @@ class ToolViewSet(
         )
 
 
+def parse_clock(value, fallback="08:00"):
+    raw = str(value or fallback).strip() or fallback
+    try:
+        hour, minute = raw.split(":")[:2]
+        return time(int(hour), int(minute))
+    except (TypeError, ValueError):
+        hour, minute = fallback.split(":")[:2]
+        return time(int(hour), int(minute))
+
+
+def project_assignees_workers(project):
+    return [person for person in project.assignees.all() if not is_admin(person)]
+
+
+def project_job_bounds(project):
+    start = project.start_date
+    if not start:
+        return None
+    end = project.end_date or start
+    if end < start:
+        end = start
+    cal = CalendarSettings.load()
+    tz = timezone.get_current_timezone()
+    starts_at = timezone.make_aware(
+        datetime.combine(start, parse_clock(getattr(cal, "work_start", None), "08:00")),
+        tz,
+    )
+    ends_at = timezone.make_aware(
+        datetime.combine(end, parse_clock(getattr(cal, "work_end", None), "17:00")),
+        tz,
+    )
+    return starts_at, ends_at
+
+
+def spanning_jobs(project, start, end):
+    qs = Job.objects.filter(project=project)
+    if start:
+        qs = qs.filter(starts_at__date=start)
+    if end:
+        qs = qs.filter(ends_at__date=end)
+    return qs
+
+
+def schedule_project_jobs(project, user):
+    bounds = project_job_bounds(project)
+    if not bounds:
+        return []
+    starts_at, ends_at = bounds
+    jobs = []
+    for person in project_assignees_workers(project):
+        jobs.append(
+            Job.objects.create(
+                project=project,
+                assigned_to=person,
+                starts_at=starts_at,
+                ends_at=ends_at,
+                created_by=user,
+            )
+        )
+    return jobs
+
+
+def sync_project_jobs(project, user, previous=None):
+    bounds = project_job_bounds(project)
+    if not bounds:
+        return
+    starts_at, ends_at = bounds
+    old_start = (previous or {}).get("start_date") or project.start_date
+    old_end = (previous or {}).get("end_date") or project.end_date or old_start
+    new_end = project.end_date or project.start_date
+    wanted = project_assignees_workers(project)
+    wanted_ids = {person.id for person in wanted}
+
+    for person in wanted:
+        job = (
+            spanning_jobs(project, old_start, old_end).filter(assigned_to=person).first()
+            or spanning_jobs(project, project.start_date, new_end).filter(assigned_to=person).first()
+        )
+        if job:
+            job.starts_at = starts_at
+            job.ends_at = ends_at
+            job.save(update_fields=["starts_at", "ends_at", "updated_at"])
+        elif not Job.objects.filter(project=project, assigned_to=person).exists():
+            Job.objects.create(
+                project=project,
+                assigned_to=person,
+                starts_at=starts_at,
+                ends_at=ends_at,
+                created_by=user,
+            )
+
+    spanning_jobs(project, old_start, old_end).exclude(assigned_to_id__in=wanted_ids).delete()
+    if old_start != project.start_date or old_end != new_end:
+        spanning_jobs(project, project.start_date, new_end).exclude(assigned_to_id__in=wanted_ids).delete()
+
+
 class ProjectViewSet(
     mixins.ListModelMixin,
     mixins.CreateModelMixin,
@@ -347,7 +560,7 @@ class ProjectViewSet(
         return ProjectListSerializer
 
     def get_permissions(self):
-        if self.action in ("create", "close", "discard", "restore", "destroy"):
+        if self.action in ("create", "update", "partial_update", "close", "discard", "restore", "destroy"):
             return [IsAuthenticated(), IsAdminType()]
         return [IsAuthenticated()]
 
@@ -357,6 +570,8 @@ class ProjectViewSet(
         ).prefetch_related(
             "assignees",
             "needed_materials__material__warehouse",
+            "needed_materials__material__project_needs__project",
+            "needed_materials__material__spendings__project",
             "borrowed_tools__tool__tool_type",
             "borrowed_tools__tool__warehouse",
             "borrowed_tools__borrowed_by",
@@ -383,13 +598,17 @@ class ProjectViewSet(
         client = (serializer.validated_data.get("client") or "").strip()
         if not name:
             serializer.validated_data["name"] = client or "Objekts"
-        if not serializer.validated_data.get("assignees"):
-            serializer.validated_data["assignees"] = [user]
-        project = serializer.save(
-            created_by=user,
-            status=Project.Status.OPEN,
-        )
-        apply_project_blueprint(project, user, tasks_payload, materials_payload)
+        if "assignees" in serializer.validated_data:
+            serializer.validated_data["assignees"] = [
+                person for person in serializer.validated_data["assignees"] if not is_admin(person)
+            ]
+        with transaction.atomic():
+            project = serializer.save(
+                created_by=user,
+                status=Project.Status.OPEN,
+            )
+            apply_project_blueprint(project, user, tasks_payload, materials_payload)
+            schedule_project_jobs(project, user)
         log_activity(
             user,
             "created",
@@ -401,13 +620,29 @@ class ProjectViewSet(
     def perform_update(self, serializer):
         if is_archived(serializer.instance):
             raise ValidationError({"detail": "Arhivētu objektu nevar labot."})
-        if not self._can_work(serializer.instance):
-            raise ValidationError({"detail": "Nav piekļuves šim projektam."})
         if not is_admin(self.request.user):
-            serializer.validated_data.pop("assignees", None)
-        serializer.validated_data.pop("tasks", None)
-        serializer.validated_data.pop("materials", None)
-        project = serializer.save()
+            raise ValidationError({"detail": "Tikai administrators var labot projektu."})
+        instance = serializer.instance
+        previous = {
+            "start_date": instance.start_date,
+            "end_date": instance.end_date,
+        }
+        tasks_payload = serializer.validated_data.pop("tasks", None)
+        materials_payload = serializer.validated_data.pop("materials", None)
+        if "assignees" in serializer.validated_data:
+            serializer.validated_data["assignees"] = [
+                person for person in serializer.validated_data["assignees"] if not is_admin(person)
+            ]
+        with transaction.atomic():
+            project = serializer.save()
+            if tasks_payload is not None or materials_payload is not None:
+                sync_project_blueprint(
+                    project,
+                    self.request.user,
+                    tasks_payload,
+                    materials_payload,
+                )
+            sync_project_jobs(project, self.request.user, previous)
         log_activity(
             self.request.user,
             "updated",
@@ -503,9 +738,9 @@ class ProjectViewSet(
 
     def destroy(self, request, *args, **kwargs):
         project = self.get_object()
-        if project.status != Project.Status.DELETED:
+        if project.status not in Project.ARCHIVED_STATUSES:
             return Response(
-                {"detail": "Neatgriezeniski dzēst var tikai arhivētus (dzēstus) objektus."},
+                {"detail": "Neatgriezeniski dzēst var tikai arhivētus objektus."},
                 status=400,
             )
         name = project.name
@@ -559,19 +794,12 @@ class ProjectViewSet(
         serializer.is_valid(raise_exception=True)
         material = serializer.validated_data["material"]
         qty = serializer.validated_data["quantity_needed"]
-        if qty <= 0:
+        row = assign_project_material(project, material, qty, replace=False)
+        if row is None:
             return Response(
                 {"quantity_needed": ["Daudzumam jābūt lielākam par 0."]},
                 status=400,
             )
-        row, created = ProjectMaterial.objects.get_or_create(
-            project=project,
-            material=material,
-            defaults={"quantity_needed": qty},
-        )
-        if not created:
-            row.quantity_needed = row.quantity_needed + qty
-            row.save(update_fields=["quantity_needed"])
         log_activity(
             request.user,
             "updated",
@@ -1209,54 +1437,110 @@ def overdue_schedule_items(user):
     return items
 
 
+def notification_items(user, *, log_limit=80, tool_limit=24):
+    items = []
+    logs = ActivityLog.objects.select_related("user").all().order_by("-created_at")
+    if not is_admin(user):
+        logs = logs.filter(user=user)
+    if log_limit is not None:
+        logs = logs[:log_limit]
+    for log in logs:
+        kind, icon = notif_style(log.action)
+        items.append(
+            {
+                "id": f"log-{log.id}",
+                "kind": kind,
+                "icon": icon,
+                "title": log.summary,
+                "sub": log.user.name if log.user else "",
+                "created_at": log.created_at.isoformat(),
+                "unread": True,
+                "source": "activity",
+                "action": log.action,
+                **notif_entity_refs(log),
+            }
+        )
+    if is_admin(user):
+        checks = (
+            ProjectToolCheck.objects.filter(status=ProjectToolCheck.Status.NAV)
+            .select_related("project", "tool")
+            .order_by("-updated_at")
+        )
+        if tool_limit is not None:
+            checks = checks[:tool_limit]
+        for check in checks:
+            items.append(
+                {
+                    "id": f"nav-{check.id}",
+                    "kind": "danger",
+                    "icon": "x",
+                    "title": f"Trūkstošs instruments: {check.tool.name}",
+                    "sub": f"#{check.project_id} {check.project.name}",
+                    "created_at": check.updated_at.isoformat(),
+                    "unread": True,
+                    "source": "tool",
+                    "project_id": check.project_id,
+                }
+            )
+    merged = overdue_schedule_items(user) + items
+    merged.sort(key=lambda row: row["created_at"], reverse=True)
+    return merged
+
+
+def unread_notification_items(user, *, limit=24, complete=False):
+    read_keys = set(
+        NotificationRead.objects.filter(user=user).values_list("notification_key", flat=True)
+    )
+    source = notification_items(
+        user,
+        log_limit=None if complete else 80,
+        tool_limit=None if complete else 24,
+    )
+    unread = [item for item in source if item["id"] not in read_keys]
+    if limit is None:
+        return unread
+    return unread[:limit]
+
+
+def mark_notification_keys(user, keys):
+    unique = []
+    seen = set()
+    for key in keys:
+        value = str(key).strip()[:80]
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    if unique:
+        NotificationRead.objects.bulk_create(
+            [NotificationRead(user=user, notification_key=key) for key in unique],
+            ignore_conflicts=True,
+        )
+    return unique
+
+
 class NotificationsViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsAdminType]
     serializer_class = ActivityLogSerializer
 
     def list(self, request, *args, **kwargs):
-        user = request.user
-        items = []
-        logs = ActivityLog.objects.select_related("user").all().order_by("-created_at")
-        if not is_admin(user):
-            logs = logs.filter(user=user)
-        for log in logs[:20]:
-            kind, icon = notif_style(log.action)
-            items.append(
-                {
-                    "id": f"log-{log.id}",
-                    "kind": kind,
-                    "icon": icon,
-                    "title": log.summary,
-                    "sub": log.user.name if log.user else "",
-                    "created_at": log.created_at.isoformat(),
-                    "unread": True,
-                    "source": "activity",
-                    "action": log.action,
-                    **notif_entity_refs(log),
-                }
-            )
-        if is_admin(user):
-            for check in (
-                ProjectToolCheck.objects.filter(status=ProjectToolCheck.Status.NAV)
-                .select_related("project", "tool")
-                .order_by("-updated_at")[:8]
-            ):
-                items.append(
-                    {
-                        "id": f"nav-{check.id}",
-                        "kind": "danger",
-                        "icon": "x",
-                        "title": f"Trūkstošs instruments: {check.tool.name}",
-                        "sub": f"#{check.project_id} {check.project.name}",
-                        "created_at": check.updated_at.isoformat(),
-                        "unread": True,
-                        "source": "tool",
-                        "project_id": check.project_id,
-                    }
-                )
-        items.sort(key=lambda row: row["created_at"], reverse=True)
-        merged = overdue_schedule_items(user) + items
-        clipped = merged[:24]
+        clipped = unread_notification_items(request.user)
+        return Response({"items": clipped, "unread": len(clipped)})
+
+    @action(detail=False, methods=["post"], url_path="mark-read")
+    def mark_read(self, request):
+        if request.data.get("all"):
+            keys = [
+                item["id"]
+                for item in unread_notification_items(request.user, limit=None, complete=True)
+            ]
+        else:
+            raw_ids = request.data.get("ids")
+            if not isinstance(raw_ids, list):
+                return Response({"detail": "ids is required."}, status=status.HTTP_400_BAD_REQUEST)
+            keys = raw_ids[:100]
+        mark_notification_keys(request.user, keys)
+        clipped = unread_notification_items(request.user)
         return Response({"items": clipped, "unread": len(clipped)})
 
 

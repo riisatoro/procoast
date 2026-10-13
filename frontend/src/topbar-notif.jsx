@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import Icon from "./icons";
-import { fetchNotifications } from "./api";
+import { fetchNotifications, markNotificationsRead } from "./api";
 import { useI18n } from "./i18n";
-import { loadNotifSeen, saveNotifSeen, unreadCount } from "./notif-seen";
+import { loadNotifSeen, markAllNotifsRead, markNotifsRead, unreadItems } from "./notif-seen";
 
 function normalizeItems(data) {
   if (Array.isArray(data)) return data;
@@ -41,10 +41,10 @@ function notifTime(iso, t, dateLocale) {
   return d.toLocaleDateString(dateLocale);
 }
 
-const NotificationsPop = ({ items: initialItems, onClose, onMarkAll, onLoaded, onOpenReport, onSelectObject }) => {
+const NotificationsPop = ({ items: initialItems, seen: seenProp, onClose, onSeenChange, onLoaded, onOpenReport, onSelectObject }) => {
   const { t, dateLocale } = useI18n();
   const [items, setItems] = useState(initialItems || []);
-  const [seen, setSeen] = useState(loadNotifSeen);
+  const seen = seenProp || loadNotifSeen();
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -64,16 +64,29 @@ const NotificationsPop = ({ items: initialItems, onClose, onMarkAll, onLoaded, o
     };
   }, []);
 
-  const unread = unreadCount(items, seen);
+  const visible = unreadItems(items, seen);
+  const unread = visible.length;
+
+  const applySeen = (next) => {
+    onSeenChange && onSeenChange(next);
+  };
+
+  const syncFromServer = (data) => {
+    const next = normalizeItems(data);
+    setItems(next);
+    if (onLoaded) onLoaded(next);
+  };
 
   const markAll = () => {
-    const latest = items.reduce((max, item) => {
-      const iso = item.created_at || "";
-      return iso > max ? iso : max;
-    }, new Date().toISOString());
-    saveNotifSeen(latest);
-    setSeen(latest);
-    onMarkAll && onMarkAll(latest);
+    applySeen(markAllNotifsRead(visible, seen));
+    markNotificationsRead({ all: true }).then(syncFromServer).catch(() => {});
+  };
+
+  const markOne = (n) => {
+    applySeen(markNotifsRead([n], seen));
+    if (n?.id) {
+      markNotificationsRead({ ids: [n.id] }).then(syncFromServer).catch(() => {});
+    }
   };
 
   return (
@@ -82,37 +95,39 @@ const NotificationsPop = ({ items: initialItems, onClose, onMarkAll, onLoaded, o
       <div className="notif-pop" onClick={(e) => e.stopPropagation()}>
         <div className="notif-head">
           <span>{t("notif.title", { n: unread })}</span>
-          <button className="link" style={{ fontSize: 11, letterSpacing: 0.04, textTransform: "none" }} onClick={markAll}>
-            {t("notif.markAll")}
-          </button>
+          {unread > 0 && (
+            <button className="link" style={{ fontSize: 11, letterSpacing: 0.04, textTransform: "none" }} onClick={markAll}>
+              {t("notif.markAll")}
+            </button>
+          )}
         </div>
         <div className="notif-list">
           {err && <div className="muted small" style={{ padding: 12 }}>{err}</div>}
-          {!items.length && !err && <div className="muted small" style={{ padding: 16 }}>{t("notif.empty")}</div>}
-          {items.map((n) => {
-            const isUnread = !seen || String(n.created_at || "") > seen;
+          {!visible.length && !err && <div className="muted small" style={{ padding: 16 }}>{t("notif.empty")}</div>}
+          {visible.map((n) => {
             const isInfo = n.kind === "info" || n.source === "schedule" || n.code === "planned_days_exceeded";
             const copy = notifCopy(n, t);
             const iconKind = n.kind === "green" ? "green" : n.kind === "warn" ? "warn" : n.kind === "danger" ? "danger" : isInfo ? "info" : "";
-            const clickable = Boolean(n.report_id || n.project_id);
+            const navigates = Boolean(n.report_id || n.project_id);
             const open = () => {
+              markOne(n);
               if (n.report_id && onOpenReport) onOpenReport(n.report_id);
               else if (n.project_id && onSelectObject) onSelectObject(n.project_id);
-              onClose && onClose();
+              if (navigates) onClose && onClose();
             };
             return (
               <div
                 key={n.id}
-                className={`notif-item ${isUnread ? "unread" : ""} ${isInfo ? "info" : ""} ${clickable ? "clickable" : ""}`}
-                role={clickable ? "button" : undefined}
-                tabIndex={clickable ? 0 : undefined}
-                onClick={clickable ? open : undefined}
-                onKeyDown={clickable ? (e) => {
+                className={`notif-item unread ${isInfo ? "info" : ""} clickable`}
+                role="button"
+                tabIndex={0}
+                onClick={open}
+                onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     open();
                   }
-                } : undefined}
+                }}
               >
                 <div className={`notif-icon ${iconKind}`}>
                   <Icon name={n.icon || "bell"} size={14} />

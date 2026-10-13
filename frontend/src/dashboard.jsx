@@ -5,7 +5,6 @@ import { closeProject, discardProject, fetchDashboardStats } from "./api";
 import { OBJECT_STATUS_LABEL, objectStatusClass, objectUiStatus } from "./object-status";
 import { useI18n } from "./i18n";
 import CsvExportMenu from "./csv-export";
-import ReportEntry from "./report-entry";
 
 const PALETTE = ["#2C5F2E", "#5B7DB1", "#F4A442", "#A66A8E", "#6E5B8A", "#7A8B5C", "#B85C5C", "#5C8B8B"];
 
@@ -24,7 +23,25 @@ const qty = (v, locale) => {
   return n.toLocaleString(locale, { maximumFractionDigits: 2 });
 };
 
-const Dashboard = ({ user, onNavigate, onSelectObject, onOpenReport }) => {
+const dayLabel = (iso, locale) => {
+  if (!iso) return "";
+  return new Date(`${String(iso).slice(0, 10)}T12:00:00`).toLocaleDateString(locale, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+const jobRangeLabel = (job, locale) => {
+  const start = job.work_date || String(job.starts_at || "").slice(0, 10);
+  const end = job.end_date || String(job.ends_at || job.starts_at || "").slice(0, 10);
+  const a = dayLabel(start, locale);
+  const b = dayLabel(end, locale);
+  if (!a) return "";
+  return a === b ? a : `${a} – ${b}`;
+};
+
+const Dashboard = ({ user, onNavigate, onSelectObject, onOpenReport, onEditProject, onProjectsChanged }) => {
   const { t, dateLocale } = useI18n();
   const [period, setPeriod] = useState(currentMonth);
   const [stats, setStats] = useState(null);
@@ -55,8 +72,7 @@ const Dashboard = ({ user, onNavigate, onSelectObject, onOpenReport }) => {
   const periodStats = stats?.period || {};
   const items = projects.items || [];
   const materials = stats?.material_usage || [];
-  const todayReports = stats?.today_reports?.length ? stats.today_reports : stats?.today_jobs || [];
-  const todayAreReports = Boolean(stats?.today_reports?.length);
+  const periodJobs = stats?.period_jobs || stats?.today_jobs || [];
   const monthDelta = Number(periodStats.done_m2_delta || 0);
 
   const completeObject = async (p) => {
@@ -66,6 +82,7 @@ const Dashboard = ({ user, onNavigate, onSelectObject, onOpenReport }) => {
     try {
       await closeProject(p.id);
       await load();
+      onProjectsChanged && onProjectsChanged();
     } catch (error) {
       setErr(error.message);
     } finally {
@@ -80,6 +97,7 @@ const Dashboard = ({ user, onNavigate, onSelectObject, onOpenReport }) => {
     try {
       await discardProject(p.id);
       await load();
+      onProjectsChanged && onProjectsChanged();
     } catch (error) {
       setErr(error.message);
     } finally {
@@ -97,10 +115,12 @@ const Dashboard = ({ user, onNavigate, onSelectObject, onOpenReport }) => {
         </div>
         <div className="page-actions">
           <PeriodPicker value={period} onChange={setPeriod} />
-          <CsvExportMenu from={period.from} to={period.to} />
-          <button className="btn btn-primary" onClick={() => onNavigate("calendar")}>
-            <Icon name="calendarPlus" size={15} /> {t("dashboard.newEntry")}
-          </button>
+          {isAdmin && <CsvExportMenu from={period.from} to={period.to} />}
+          {isAdmin && (
+            <button className="btn btn-primary" onClick={() => onNavigate("calendar")}>
+              <Icon name="calendarPlus" size={15} /> {t("dashboard.newEntry")}
+            </button>
+          )}
         </div>
       </header>
 
@@ -184,6 +204,19 @@ const Dashboard = ({ user, onNavigate, onSelectObject, onOpenReport }) => {
                       )}
                       <span className={objectStatusClass(p.status)}>{t(OBJECT_STATUS_LABEL[ui])}</span>
                       <span className="obj-pct mono">{pct}%</span>
+                      {isAdmin && ui !== "completed" && onEditProject && (
+                        <button
+                          className="icon-btn sm"
+                          title={t("common.edit")}
+                          disabled={busyId === p.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditProject(p);
+                          }}
+                        >
+                          <Icon name="edit" size={13} />
+                        </button>
+                      )}
                       {isAdmin && ui !== "completed" && (
                         <button
                           className="icon-btn sm"
@@ -222,22 +255,48 @@ const Dashboard = ({ user, onNavigate, onSelectObject, onOpenReport }) => {
         <section className="card">
           <div className="card-head">
             <h2 className="card-title">{t("dashboard.jobsToday")}</h2>
-            <span className="badge">{t("dashboard.entries", { n: todayReports.length })}</span>
+            <span className="badge">{t("dashboard.entries", { n: periodJobs.length })}</span>
           </div>
           {loading ? (
             <div className="muted small">{t("common.loading")}</div>
-          ) : todayReports.length === 0 ? (
+          ) : periodJobs.length === 0 ? (
             <div className="muted small">{t("dashboard.noJobs")}</div>
           ) : (
             <div className="reports-feed">
-              {todayReports.map((row) => (
-                <ReportEntry
-                  key={row.id}
-                  row={row}
-                  onSelectProject={onSelectObject}
-                  onOpen={todayAreReports ? onOpenReport : undefined}
-                />
-              ))}
+              {periodJobs.map((job) => {
+                const color = job.color || PALETTE[(job.project_id || job.id) % PALETTE.length];
+                const title = job.client || job.project_name || job.project || t("common.dash");
+                return (
+                  <article key={job.id} className="entry-card" style={{ "--entry-color": color }}>
+                    <header className="entry-card-head">
+                      <div className="entry-ident">
+                        <div
+                          className={`entry-project ${onSelectObject && (job.project_id || job.object_id) ? "clickable" : ""}`}
+                          role={onSelectObject && (job.project_id || job.object_id) ? "button" : undefined}
+                          onClick={() => {
+                            const id = job.project_id || job.object_id;
+                            if (id && onSelectObject) onSelectObject(id);
+                          }}
+                        >
+                          <span className="obj-dot" style={{ background: color }} />
+                          {job.project_id || job.object_id ? (
+                            <span className="mono small">#{job.project_id || job.object_id}</span>
+                          ) : null}
+                          <span className="entry-project-name">{title}</span>
+                          {job.address ? <span className="entry-project-addr">{job.address}</span> : null}
+                        </div>
+                        <div className="entry-person">
+                          <span className="avatar sm">{job.initials || job.worker || "?"}</span>
+                          <div>
+                            <div className="entry-person-name">{job.worker_name || job.assigned_to || t("common.dash")}</div>
+                          </div>
+                        </div>
+                        <div className="entry-when muted small">{jobRangeLabel(job, dateLocale)}</div>
+                      </div>
+                    </header>
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>

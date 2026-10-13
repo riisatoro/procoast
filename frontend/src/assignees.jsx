@@ -19,8 +19,17 @@ export function isAssignedTo(project, userId) {
   return projectAssignees(project).some((person) => String(person.id) === String(userId));
 }
 
+export function isAdminUser(person) {
+  return person?.role === "ADMINISTRATORS" || person?.user_type === "admin" || person?.is_superuser;
+}
+
+export function workerUsers(users) {
+  return (users || []).filter((person) => person && person.is_active !== false && !isAdminUser(person));
+}
+
 export function AssigneePicker({ users, value, onChange, disabled }) {
   const { t } = useI18n();
+  const people = workerUsers(users);
   const selected = (value || []).map(Number);
 
   const toggle = (id, event) => {
@@ -30,13 +39,13 @@ export function AssigneePicker({ users, value, onChange, disabled }) {
     onChange(next);
   };
 
-  if (!users?.length) {
+  if (!people.length) {
     return <div className="muted small">{t("projects.noUsers")}</div>;
   }
 
   return (
     <div className="assignee-pick">
-      {users.map((person) => {
+      {people.map((person) => {
         const on = selected.includes(Number(person.id));
         return (
           <button

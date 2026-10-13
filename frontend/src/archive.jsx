@@ -8,7 +8,7 @@ import ReportEntry from "./report-entry";
 
 const num = (v) => Number(v || 0);
 
-const Archive = ({ user, onSelectObject, onOpenReport }) => {
+const Archive = ({ user, onSelectObject, onOpenReport, onProjectsChanged }) => {
   const { t, dateLocale } = useI18n();
   const [items, setItems] = useState([]);
   const [reports, setReports] = useState([]);
@@ -64,6 +64,7 @@ const Archive = ({ user, onSelectObject, onOpenReport }) => {
     try {
       await restoreProject(p.id);
       await loadProjects();
+      onProjectsChanged && onProjectsChanged();
     } catch (error) {
       setErr(error.message);
     }
@@ -191,19 +192,17 @@ const Archive = ({ user, onSelectObject, onOpenReport }) => {
                     </td>
                     <td className="ta-r">
                       {deletedRow ? (
-                        <>
-                          <button className="icon-btn sm" title={t("archive.restore")} onClick={() => restore(p)}>
-                            <Icon name="arrowRight" size={13} />
-                          </button>
-                          <button className="icon-btn sm danger" title={t("archive.purge")} onClick={() => purge(p)}>
-                            <Icon name="trash" size={13} />
-                          </button>
-                        </>
+                        <button className="icon-btn sm" title={t("archive.restore")} onClick={() => restore(p)}>
+                          <Icon name="arrowRight" size={13} />
+                        </button>
                       ) : (
                         <button className="icon-btn sm" title={t("common.view")} onClick={() => onSelectObject && onSelectObject(p.id)}>
                           <Icon name="edit" size={13} />
                         </button>
                       )}
+                      <button className="icon-btn sm danger" title={t("archive.purge")} onClick={() => purge(p)}>
+                        <Icon name="trash" size={13} />
+                      </button>
                     </td>
                   </tr>
                 );

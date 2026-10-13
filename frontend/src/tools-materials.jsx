@@ -3,7 +3,6 @@ import Icon from "./icons";
 import {
   addProjectMaterial,
   addProjectSpending,
-  createMaterial,
   fetchMaterials,
   fetchProject,
   fetchProjects,
@@ -13,7 +12,6 @@ import {
 } from "./api";
 import { useI18n } from "./i18n";
 import { lastProjectId, rememberProject } from "./last-project";
-import { emptyMaterialForm, MaterialForm } from "./material-form";
 
 const TYPE_ICONS = ["wrench", "package", "settings", "shield", "clipboard", "folder"];
 
@@ -245,22 +243,71 @@ const ToolsTaken = ({ user, onOpenInventory }) => {
   );
 };
 
-const AddNeededModal = ({ materials, onClose, onSave }) => {
+const AddNeededModal = ({ materials, warehouses, project, onClose, onSave }) => {
   const { t } = useI18n();
-  const [form, setForm] = useState({ material: materials[0]?.id || "", quantity_needed: "" });
+  const [warehouse, setWarehouse] = useState(warehouses[0]?.id || "");
+  const [material, setMaterial] = useState("");
+  const [quantityNeeded, setQuantityNeeded] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const inWarehouse = useMemo(
+    () => (materials || []).filter((row) => String(row.warehouse) === String(warehouse)),
+    [materials, warehouse]
+  );
+  const selected = inWarehouse.find((row) => String(row.id) === String(material));
+  const available = selected ? num(selected.available ?? selected.stock) : 0;
+  const stock = selected ? num(selected.stock) : 0;
+  const reserved = selected ? num(selected.reserved) : 0;
+  const unit = selected?.unit || "kg";
+  const hintNeed = selected && project?.total_m2 && num(selected.per_m2)
+    ? String(Math.round(num(selected.per_m2) * num(project.total_m2) * 100) / 100)
+    : "";
+
+  const pickWarehouse = (id) => {
+    setWarehouse(id);
+    setMaterial("");
+    setQuantityNeeded("");
+    setErr("");
+  };
+
+  const pickMaterial = (id) => {
+    setMaterial(id);
+    const row = inWarehouse.find((item) => String(item.id) === String(id));
+    if (!row) {
+      setQuantityNeeded("");
+      return;
+    }
+    const rate = num(row.per_m2);
+    const area = num(project?.total_m2);
+    if (rate > 0 && area > 0) {
+      setQuantityNeeded(String(Math.round(rate * area * 100) / 100));
+    }
+  };
+
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.material || !form.quantity_needed) {
+    if (!warehouse || !material || !quantityNeeded) {
+      setErr(t("takenMaterials.fillAll"));
+      return;
+    }
+    const qty = num(quantityNeeded);
+    if (!(qty > 0)) {
       setErr(t("takenMaterials.fillBoth"));
+      return;
+    }
+    if (qty > available) {
+      setErr(t("takenMaterials.notEnough", { n: available, unit }));
       return;
     }
     setBusy(true);
     setErr("");
     try {
-      await onSave({ material: Number(form.material), quantity_needed: form.quantity_needed });
+      await onSave({
+        warehouse: Number(warehouse),
+        material: Number(material),
+        quantity_needed: quantityNeeded,
+      });
     } catch (error) {
       setErr(error.message || t("common.saveFailed"));
       setBusy(false);
@@ -280,19 +327,52 @@ const AddNeededModal = ({ materials, onClose, onSave }) => {
         <form onSubmit={submit}>
           <div className="modal-body">
             <label className="field">
-              <span className="field-label">{t("common.material")}</span>
-              <select className="select" value={form.material} onChange={(e) => setForm({ ...form, material: e.target.value })}>
+              <span className="field-label">{t("materialsPage.warehouse")}</span>
+              <select className="select" value={warehouse} onChange={(e) => pickWarehouse(e.target.value)}>
                 <option value="">—</option>
-                {materials.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}{m.color ? ` · ${m.color}` : ""} · {m.warehouse_name}
-                  </option>
+                {warehouses.map((wh) => (
+                  <option key={wh.id} value={wh.id}>{wh.location ? `${wh.name} · ${wh.location}` : wh.name}</option>
                 ))}
               </select>
             </label>
             <label className="field">
+              <span className="field-label">{t("common.material")}</span>
+              <select className="select" value={material} onChange={(e) => pickMaterial(e.target.value)} disabled={!warehouse}>
+                <option value="">—</option>
+                {inWarehouse.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.name}{row.color ? ` · ${row.color}` : ""} · {t("materialsPage.available")} {row.available ?? row.stock} {row.unit}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selected && (
+              <div className="info-strip">
+                <Icon name="package" size={14} />
+                <span>
+                  {t("materialsPage.stock")} {stock} {unit}
+                  {" · "}
+                  {t("materialsPage.reserved")} {reserved} {unit}
+                  {" · "}
+                  {t("materialsPage.available")} {available} {unit}
+                </span>
+              </div>
+            )}
+            <label className="field">
               <span className="field-label">{t("takenMaterials.needed")}</span>
-              <input className="input" type="number" min="0.01" step="0.01" value={form.quantity_needed} onChange={(e) => setForm({ ...form, quantity_needed: e.target.value })} />
+              <input
+                className="input"
+                type="number"
+                min="0.01"
+                step="0.01"
+                max={available || undefined}
+                value={quantityNeeded}
+                onChange={(e) => setQuantityNeeded(e.target.value)}
+                placeholder={hintNeed || ""}
+              />
+              {hintNeed && !quantityNeeded && (
+                <span className="muted small">{t("materialsPage.needHint", { n: hintNeed, unit })}</span>
+              )}
             </label>
             {err && <div className="login-err">{err}</div>}
           </div>
@@ -310,7 +390,6 @@ const AddNeededModal = ({ materials, onClose, onSave }) => {
 
 const MaterialsTaken = ({ user, onOpenWarehouse }) => {
   const { t } = useI18n();
-  const isAdmin = user.role === "ADMINISTRATORS";
   const [projects, setProjects] = useState([]);
   const [catalog, setCatalog] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
@@ -322,7 +401,6 @@ const MaterialsTaken = ({ user, onOpenWarehouse }) => {
   const [err, setErr] = useState("");
   const [saved, setSaved] = useState("");
   const [showAdd, setShowAdd] = useState(false);
-  const [showNew, setShowNew] = useState(false);
 
   const closed = project?.status === "closed";
   const rows = project?.needed_materials || [];
@@ -454,12 +532,7 @@ const MaterialsTaken = ({ user, onOpenWarehouse }) => {
             </button>
           )}
           {project && !closed && (
-            <button className="btn btn-primary" onClick={() => setShowNew(true)} disabled={!warehouses.length}>
-              <Icon name="plus" size={15} /> {t("materialsPage.new")}
-            </button>
-          )}
-          {isAdmin && project && !closed && (
-            <button className="btn btn-ghost" onClick={() => setShowAdd(true)} disabled={!catalog.length}>
+            <button className="btn btn-primary" onClick={() => setShowAdd(true)} disabled={!catalog.length || !warehouses.length}>
               <Icon name="plus" size={15} /> {t("takenMaterials.add")}
             </button>
           )}
@@ -512,7 +585,18 @@ const MaterialsTaken = ({ user, onOpenWarehouse }) => {
                   const unit = m.unit || "kg";
                   return (
                     <div key={row.id} className={`mt-row ${done ? "mt-done" : ""}`}>
-                      <div className="dt-name">{m.name}</div>
+                      <div className="dt-name">
+                        {m.name}
+                        <div className="muted small">
+                          {m.warehouse_name || t("common.dash")}
+                          {" · "}
+                          {t("materialsPage.stock")} {num(m.stock)} {unit}
+                          {" · "}
+                          {t("materialsPage.reserved")} {num(m.reserved)} {unit}
+                          {" · "}
+                          {t("materialsPage.available")} {num(m.available ?? m.stock)} {unit}
+                        </div>
+                      </div>
                       <div className="muted">{m.color || t("common.dash")}</div>
                       <div className="ta-r mono" data-label={`${t("takenMaterials.needed")}: `}>{needed} {unit}</div>
                       <div>
@@ -566,34 +650,16 @@ const MaterialsTaken = ({ user, onOpenWarehouse }) => {
         </>
       )}
 
-      {showNew && project && (
-        <MaterialForm
-          title={t("materialsPage.new")}
-          initial={emptyMaterialForm}
-          warehouses={warehouses}
-          projects={projects}
-          defaultProjectId={project.id}
-          lockProject
-          linkProject
-          onClose={() => setShowNew(false)}
-          onSave={async (payload) => {
-            await createMaterial(payload);
-            setShowNew(false);
-            await loadLists();
-            const p = await fetchProject(project.id);
-            applyProject(p);
-            setSaved(t("materialsPage.createdLinked"));
-            setTimeout(() => setSaved(""), 2200);
-          }}
-        />
-      )}
-      {showAdd && (
+      {showAdd && project && (
         <AddNeededModal
           materials={catalog}
+          warehouses={warehouses}
+          project={project}
           onClose={() => setShowAdd(false)}
           onSave={async (payload) => {
             await addProjectMaterial(project.id, payload);
             setShowAdd(false);
+            await loadLists();
             const p = await fetchProject(project.id);
             applyProject(p);
             setSaved(t("projects.materialAdded"));
