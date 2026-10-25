@@ -390,6 +390,7 @@ const AddNeededModal = ({ materials, warehouses, project, onClose, onSave }) => 
 
 const MaterialsTaken = ({ user, onOpenWarehouse }) => {
   const { t } = useI18n();
+  const isAdmin = user?.role === "ADMINISTRATORS";
   const [projects, setProjects] = useState([]);
   const [catalog, setCatalog] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
@@ -531,7 +532,7 @@ const MaterialsTaken = ({ user, onOpenWarehouse }) => {
               <Icon name="warehouse" size={15} /> {t("nav.warehouses")}
             </button>
           )}
-          {project && !closed && (
+          {isAdmin && project && !closed && (
             <button className="btn btn-primary" onClick={() => setShowAdd(true)} disabled={!catalog.length || !warehouses.length}>
               <Icon name="plus" size={15} /> {t("takenMaterials.add")}
             </button>
@@ -566,6 +567,7 @@ const MaterialsTaken = ({ user, onOpenWarehouse }) => {
             {!rows.length ? (
               <div className="muted small">{t("takenMaterials.noMaterials")}</div>
             ) : (
+              <div className="table-scroll">
               <div className="mat-table">
                 <div className="mt-head">
                   <div>{t("common.material")}</div>
@@ -573,14 +575,12 @@ const MaterialsTaken = ({ user, onOpenWarehouse }) => {
                   <div className="ta-r">{t("takenMaterials.needed")}</div>
                   <div>{t("takenMaterials.taken")}</div>
                   <div className="ta-r">{t("takenMaterials.remain")}</div>
-                  <div>{t("takenMaterials.progress")}</div>
                 </div>
                 {rows.map((row) => {
                   const m = row.material_detail || {};
                   const needed = num(row.quantity_needed);
                   const cur = currentTaken(row);
                   const remain = round2(needed - cur);
-                  const pct = needed ? Math.min(100, Math.round((cur / needed) * 100)) : 0;
                   const done = remain <= 0;
                   const unit = m.unit || "kg";
                   return (
@@ -628,13 +628,10 @@ const MaterialsTaken = ({ user, onOpenWarehouse }) => {
                       <div className={`ta-r mono ${done ? "ok" : ""}`} data-label={`${t("takenMaterials.remain")}: `}>
                         {done ? t("takenMaterials.remainDone") : t("takenMaterials.remainQty", { n: remain, unit })}
                       </div>
-                      <div>
-                        <div className="bar"><div className="bar-fill" style={{ width: pct + "%", background: done ? "#4CAF50" : "#2C5F2E" }} /></div>
-                        <div className="mono tiny muted">{pct}%</div>
-                      </div>
                     </div>
                   );
                 })}
+              </div>
               </div>
             )}
           </section>
@@ -650,7 +647,7 @@ const MaterialsTaken = ({ user, onOpenWarehouse }) => {
         </>
       )}
 
-      {showAdd && project && (
+      {isAdmin && showAdd && project && (
         <AddNeededModal
           materials={catalog}
           warehouses={warehouses}

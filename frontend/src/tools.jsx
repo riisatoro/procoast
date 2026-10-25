@@ -264,6 +264,7 @@ const ToolsInventory = ({ onBack }) => {
             {types.length === 0 ? (
               <div className="muted small">{t("tools.noTypes")}</div>
             ) : (
+              <div className="table-scroll">
               <table className="table">
                 <thead>
                   <tr>
@@ -275,13 +276,13 @@ const ToolsInventory = ({ onBack }) => {
                 <tbody>
                   {types.map((ty) => (
                     <tr key={ty.id}>
-                      <td className="dt-name">
+                      <td className="dt-name" data-label={t("common.name")}>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                           <Icon name={TYPE_ICONS.includes(ty.icon) ? ty.icon : "wrench"} size={14} />
                           {ty.name}
                         </span>
                       </td>
-                      <td className="muted">{ty.description || t("common.dash")}</td>
+                      <td className="muted" data-label={t("common.description")}>{ty.description || t("common.dash")}</td>
                       <td className="ta-r">
                         <button className="icon-btn sm" onClick={() => setModal({ mode: "type-edit", item: ty })}>
                           <Icon name="edit" size={13} />
@@ -291,6 +292,7 @@ const ToolsInventory = ({ onBack }) => {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </section>
 
@@ -301,6 +303,7 @@ const ToolsInventory = ({ onBack }) => {
               <div className="card-head">
                 <h2 className="card-title">{t("tools.inventory")}</h2>
               </div>
+              <div className="table-scroll">
               <table className="table">
                 <thead>
                   <tr>
@@ -317,16 +320,16 @@ const ToolsInventory = ({ onBack }) => {
                 <tbody>
                   {items.map((tool) => (
                     <tr key={tool.id}>
-                      <td className="dt-name">{tool.name}</td>
-                      <td>{tool.tool_type_name}</td>
-                      <td>
+                      <td className="dt-name" data-label={t("tools.tool")}>{tool.name}</td>
+                      <td data-label={t("tools.type")}>{tool.tool_type_name}</td>
+                      <td data-label={t("tools.warehouse")}>
                         {tool.warehouse_name}
                         {tool.warehouse_location ? <div className="muted small">{tool.warehouse_location}</div> : null}
                       </td>
-                      <td className="muted small">{tool.recommended || t("common.dash")}</td>
-                      <td className="mono">{tool.stock} {tool.unit}</td>
-                      <td className="mono">{tool.borrowed} {tool.unit}</td>
-                      <td className="mono">{tool.available} {tool.unit}</td>
+                      <td className="muted small" data-label={t("tools.recommended")}>{tool.recommended || t("common.dash")}</td>
+                      <td className="mono" data-label={t("tools.amount")}>{tool.stock} {tool.unit}</td>
+                      <td className="mono" data-label={t("tools.borrowed")}>{tool.borrowed} {tool.unit}</td>
+                      <td className="mono" data-label={t("tools.available")}>{tool.available} {tool.unit}</td>
                       <td className="ta-r">
                         <button className="icon-btn sm" onClick={() => setModal({ mode: "tool-edit", item: tool })}>
                           <Icon name="edit" size={13} />
@@ -336,6 +339,7 @@ const ToolsInventory = ({ onBack }) => {
                   ))}
                 </tbody>
               </table>
+              </div>
             </section>
           )}
         </>

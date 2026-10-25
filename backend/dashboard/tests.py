@@ -1,11 +1,12 @@
 from datetime import date, datetime, time
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from operations.models import Job, Project
+from operations.models import DailyReport, Job, Material, MaterialSpending, Project, ProjectMaterial, Warehouse
 
 User = get_user_model()
 
@@ -104,4 +105,92 @@ class DashboardPeriodFilterTests(TestCase):
         self.assertEqual(res.data["period"]["from"], "2026-09-01")
         self.assertEqual(res.data["period"]["to"], "2026-09-10")
         self.assertEqual(res.data["period"]["jobs"], 5)
+
+    def test_active_projects_ignore_selected_period(self):
+        may = self.api.get("/api/dashboard/stats/?from=2026-05-01&to=2026-05-31")
+        oct_ = self.api.get("/api/dashboard/stats/?from=2026-10-01&to=2026-10-31")
+        self.assertEqual(may.status_code, 200)
+        self.assertEqual(oct_.status_code, 200)
+        self.assertEqual(may.data["projects"]["active"], oct_.data["projects"]["active"])
+        self.assertEqual(
+            {row["id"] for row in may.data["projects"]["items"]},
+            {row["id"] for row in oct_.data["projects"]["items"]},
+        )
+
+    def test_today_reports_stay_on_current_day(self):
+        today = timezone.localdate()
+        DailyReport.objects.create(
+            project=self.project,
+            recorded_by=self.worker,
+            work_date=today,
+            notes="today",
+        )
+        DailyReport.objects.create(
+            project=self.project,
+            recorded_by=self.admin,
+            work_date=date(2026, 5, 6),
+            notes="may",
+        )
+        res = self.api.get("/api/dashboard/stats/?from=2026-05-01&to=2026-05-31")
+        self.assertEqual(res.status_code, 200)
+        dates = {row["work_date"] for row in res.data.get("today_reports") or []}
+        self.assertEqual(dates, {today.isoformat()})
+        later = self.api.get("/api/dashboard/stats/?from=2026-10-01&to=2026-10-31")
+        later_dates = {row["work_date"] for row in later.data.get("today_reports") or []}
+        self.assertEqual(later_dates, {today.isoformat()})
+
+    def test_today_jobs_stay_on_current_day(self):
+        today = timezone.localdate()
+        current = self._job(today)
+        historical = self._job(date(2026, 5, 6))
+        res = self.api.get("/api/dashboard/stats/?from=2026-05-01&to=2026-05-31")
+        self.assertEqual(res.status_code, 200)
+        today_ids = {row["id"] for row in res.data.get("today_jobs") or []}
+        period_ids = {row["id"] for row in res.data.get("period_jobs") or []}
+        self.assertIn(current.id, today_ids)
+        self.assertNotIn(historical.id, today_ids)
+        self.assertIn(historical.id, period_ids)
+
+    def test_material_spent_follows_period(self):
+        warehouse = Warehouse.objects.create(name="Main")
+        material = Material.objects.create(name="EP11", warehouse=warehouse, unit="kg")
+        ProjectMaterial.objects.create(
+            project=self.project,
+            material=material,
+            quantity_needed=Decimal("100"),
+        )
+        may_row = MaterialSpending.objects.create(
+            project=self.project,
+            material=material,
+            quantity=Decimal("40"),
+            recorded_by=self.worker,
+        )
+        MaterialSpending.objects.filter(pk=may_row.pk).update(
+            created_at=timezone.make_aware(datetime.combine(date(2026, 5, 6), time(12, 0)))
+        )
+        oct_row = MaterialSpending.objects.create(
+            project=self.project,
+            material=material,
+            quantity=Decimal("15"),
+            recorded_by=self.worker,
+        )
+        MaterialSpending.objects.filter(pk=oct_row.pk).update(
+            created_at=timezone.make_aware(datetime.combine(date(2026, 10, 10), time(12, 0)))
+        )
+        may = self.api.get("/api/dashboard/stats/?from=2026-05-01&to=2026-05-31")
+        oct_ = self.api.get("/api/dashboard/stats/?from=2026-10-01&to=2026-10-31")
+        self.assertEqual(Decimal(res_spent(may, material.id)), Decimal("40"))
+        self.assertEqual(Decimal(res_spent(oct_, material.id)), Decimal("15"))
+        self.api.force_authenticate(user=self.worker)
+        worker_may = self.api.get("/api/dashboard/stats/?from=2026-05-01&to=2026-05-31")
+        self.assertEqual(worker_may.status_code, 200)
+        self.assertEqual(Decimal(res_spent(worker_may, material.id)), Decimal("40"))
+        self.assertEqual(worker_may.data["period"]["from"], "2026-05-01")
+
+
+def res_spent(res, material_id):
+    for row in res.data.get("material_usage") or []:
+        if row["id"] == material_id:
+            return str(Decimal(row["spent"]))
+    return None
 

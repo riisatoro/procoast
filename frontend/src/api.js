@@ -279,6 +279,10 @@ export const fetchJobs = (params = {}) => {
 };
 export const createJob = (payload) =>
   jsonCall("/api/jobs/", { method: "POST", body: JSON.stringify(payload) }, t("api.createJob"));
+export const updateJob = (id, payload) =>
+  jsonCall(`/api/jobs/${id}/`, { method: "PATCH", body: JSON.stringify(payload) }, t("api.saveJob"));
+export const deleteJob = (id) =>
+  jsonCall(`/api/jobs/${id}/`, { method: "DELETE" }, t("api.deleteJob"));
 
 function mapSystem(row) {
   return {

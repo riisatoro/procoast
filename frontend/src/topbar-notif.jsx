@@ -149,19 +149,21 @@ const NotificationsPop = ({ items: initialItems, seen: seenProp, onClose, onSeen
   );
 };
 
-const MobileTopbar = ({ onOpenSidebar }) => {
+const MobileTopbar = ({ onOpenSidebar, children }) => {
   const { t } = useI18n();
   return (
-    <div className="mobile-topbar">
-      <button className="menu-btn" onClick={onOpenSidebar} aria-label={t("mobile.menu")}>
+    <header className="app-chrome">
+      <button className="menu-btn chrome-mobile" onClick={onOpenSidebar} aria-label={t("mobile.menu")}>
         <Icon name="moreH" size={18} />
       </button>
-      <div className="mobile-topbar-brand">
+      <div className="mobile-topbar-brand chrome-mobile">
         <div className="mobile-topbar-logo">P</div>
         <span>PROCOAT</span>
       </div>
-      <span className="live-dot" title={t("mobile.live")}></span>
-    </div>
+      <div className="app-chrome-actions">
+        {children}
+      </div>
+    </header>
   );
 };
 

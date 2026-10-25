@@ -153,8 +153,8 @@ const WarehousesPage = ({ user }) => {
           <section className="card">
             <label className="field">
               <span className="field-label">{t("warehouses.select")}</span>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <select className="select" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} style={{ flex: 1 }}>
+              <div className="split-row">
+                <select className="select" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
                   {warehouses.map((w) => (
                     <option key={w.id} value={w.id}>{warehouseLabel(w)}</option>
                   ))}
@@ -202,19 +202,19 @@ const WarehousesPage = ({ user }) => {
                       const linked = m.linked_projects || [];
                       return (
                         <tr key={m.id}>
-                          <td className="dt-name">{m.name}</td>
-                          <td className="muted">{m.color || "—"}</td>
-                          <td>
+                          <td className="dt-name" data-label={t("common.material")}>{m.name}</td>
+                          <td className="muted" data-label={t("materialsPage.colorType")}>{m.color || "—"}</td>
+                          <td data-label={t("common.object")}>
                             {linked.length ? linked.map((p) => (
                               <div key={p.id} className="muted small">
                                 #{p.id} {p.client || p.name}
                               </div>
                             )) : t("common.dash")}
                           </td>
-                          <td className="mono">{m.per_m2 ?? "—"}</td>
-                          <td className="mono">{m.stock} {m.unit}</td>
-                          <td className="mono">{m.reserved ?? "0"} {m.unit}</td>
-                          <td className="mono">{m.available ?? m.stock} {m.unit}</td>
+                          <td className="mono" data-label={t("materialsPage.kgM2")}>{m.per_m2 ?? "—"}</td>
+                          <td className="mono" data-label={t("materialsPage.stock")}>{m.stock} {m.unit}</td>
+                          <td className="mono" data-label={t("materialsPage.reserved")}>{m.reserved ?? "0"} {m.unit}</td>
+                          <td className="mono" data-label={t("materialsPage.available")}>{m.available ?? m.stock} {m.unit}</td>
                           <td className="ta-r">
                             {isAdmin && (
                               <button className="icon-btn sm" onClick={() => setModal({ mode: "material-edit", item: m })}>
@@ -260,7 +260,7 @@ const WarehousesPage = ({ user }) => {
           }}
         />
       )}
-      {modal?.mode === "material-create" && (
+      {isAdmin && modal?.mode === "material-create" && (
         <MaterialForm
           title={t("materialsPage.new")}
           initial={{ ...emptyMaterialForm, warehouse: warehouseId }}
@@ -275,7 +275,7 @@ const WarehousesPage = ({ user }) => {
           }}
         />
       )}
-      {modal?.mode === "material-edit" && (
+      {isAdmin && modal?.mode === "material-edit" && (
         <MaterialForm
           title={t("materialsPage.edit")}
           initial={modal.item}

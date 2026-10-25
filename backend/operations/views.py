@@ -1,4 +1,4 @@
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.db import transaction
@@ -29,6 +29,7 @@ from .models import (
     NotificationRead,
     Project,
     ProjectMaterial,
+    ProjectPeriod,
     ProjectTask,
     ProjectTool,
     ProjectToolCheck,
@@ -125,24 +126,22 @@ def material_from_row(user, row):
         per_m2 = Decimal(str(per_m2)) if per_m2 not in (None, "") else None
     except (ArithmeticError, TypeError, ValueError):
         per_m2 = None
-    name = str(row.get("name") or "").strip()
-    if material is None:
-        if not name:
-            return None
-        return get_or_create_material(
-            user,
-            name,
-            color=str(row.get("color") or ""),
-            unit=str(row.get("unit") or "kg"),
-            per_m2=per_m2,
-        )
-    updates = []
-    if per_m2 is not None and material.per_m2 != per_m2:
-        material.per_m2 = per_m2
-        updates.append("per_m2")
-    if updates:
-        material.save(update_fields=updates + ["updated_at"])
-    return material
+    name = str(row.get("name") or "").strip() or (material.name if material else "")
+    color = str(row.get("color") or "").strip()
+    if color in {"—", "-"}:
+        color = ""
+    if "color" not in row and material is not None:
+        color = material.color or ""
+    unit = str(row.get("unit") or "").strip() or (material.unit if material else "kg")
+    if not name:
+        return None
+    return get_or_create_material(
+        user,
+        name,
+        color=color,
+        unit=unit or "kg",
+        per_m2=per_m2,
+    )
 
 
 def assign_project_material(project, material, qty, *, replace=False):
@@ -461,14 +460,13 @@ def project_assignees_workers(project):
     return [person for person in project.assignees.all() if not is_admin(person)]
 
 
-def project_job_bounds(project):
-    start = project.start_date
+def job_datetimes(start, end=None, cal=None):
     if not start:
         return None
-    end = project.end_date or start
+    end = end or start
     if end < start:
         end = start
-    cal = CalendarSettings.load()
+    cal = cal or CalendarSettings.load()
     tz = timezone.get_current_timezone()
     starts_at = timezone.make_aware(
         datetime.combine(start, parse_clock(getattr(cal, "work_start", None), "08:00")),
@@ -481,66 +479,188 @@ def project_job_bounds(project):
     return starts_at, ends_at
 
 
-def spanning_jobs(project, start, end):
-    qs = Job.objects.filter(project=project)
-    if start:
-        qs = qs.filter(starts_at__date=start)
+def project_job_bounds(project):
+    return job_datetimes(project.start_date, project.end_date or project.start_date)
+
+
+def job_local_dates(job):
+    start = timezone.localtime(job.starts_at).date()
+    end_at = job.ends_at or job.starts_at
+    end = timezone.localtime(end_at).date()
+    return start, end
+
+
+def clear_prefetch(instance, *lookups):
+    cache = getattr(instance, "_prefetched_objects_cache", None)
+    if not cache:
+        return
+    for key in lookups:
+        cache.pop(key, None)
+
+
+def apply_period_bounds(project):
+    periods = list(project.periods.all())
+    if not periods:
+        return
+    starts = [row.start_date for row in periods if row.start_date]
+    ends = [(row.end_date or row.start_date) for row in periods if row.start_date]
+    if not starts:
+        return
+    project.start_date = min(starts)
+    project.end_date = max(ends)
+    project.planned_days = sum(row.length_days() for row in periods) or None
+    project.save(update_fields=["start_date", "end_date", "planned_days", "updated_at"])
+
+
+def replace_project_periods(project, rows):
+    wanted = []
+    for row in rows or []:
+        start = row.get("start_date") if isinstance(row, dict) else getattr(row, "start_date", None)
+        end = row.get("end_date") if isinstance(row, dict) else getattr(row, "end_date", None)
+        if not start:
+            continue
+        end = end or start
+        if end < start:
+            end = start
+        wanted.append((start, end))
+    wanted.sort()
+    project.periods.all().delete()
+    for start, end in wanted:
+        ProjectPeriod.objects.create(project=project, start_date=start, end_date=end)
+    apply_period_bounds(project)
+
+
+def ensure_project_period(project, start, end=None):
+    if not start:
+        return None
+    end = end or start
+    if end < start:
+        end = start
+    period = project.periods.filter(start_date=start, end_date=end).first()
+    if period:
+        return period
+    period = ProjectPeriod.objects.create(project=project, start_date=start, end_date=end)
+    apply_period_bounds(project)
+    return period
+
+
+def jobs_for_range(project, start, end):
+    qs = Job.objects.filter(project=project, starts_at__date=start)
     if end:
         qs = qs.filter(ends_at__date=end)
     return qs
 
 
+def drop_period_if_unused(project, start, end):
+    if jobs_for_range(project, start, end).exists():
+        return
+    deleted, _ = project.periods.filter(start_date=start, end_date=end).delete()
+    if deleted:
+        apply_period_bounds(project)
+
+
+def sync_job_period_dates(job, old_start, old_end):
+    new_start, new_end = job_local_dates(job)
+    if old_start == new_start and old_end == new_end:
+        return
+    remaining = jobs_for_range(job.project, old_start, old_end).exclude(pk=job.pk)
+    if remaining.exists():
+        return
+    period = job.project.periods.filter(start_date=old_start, end_date=old_end).first()
+    if period:
+        period.start_date = new_start
+        period.end_date = new_end
+        period.save(update_fields=["start_date", "end_date"])
+        apply_period_bounds(job.project)
+        return
+    ensure_project_period(job.project, new_start, new_end)
+
+
+def seed_project_periods(project):
+    if project.periods.exists() or not project.start_date:
+        return
+    end = project.end_date or project.start_date
+    if project.planned_days and not project.end_date:
+        end = project.start_date + timedelta(days=int(project.planned_days) - 1)
+    replace_project_periods(
+        project,
+        [{"start_date": project.start_date, "end_date": end}],
+    )
+
+
 def schedule_project_jobs(project, user):
-    bounds = project_job_bounds(project)
-    if not bounds:
+    seed_project_periods(project)
+    periods = list(project.periods.all())
+    workers = project_assignees_workers(project)
+    if not periods or not workers:
         return []
-    starts_at, ends_at = bounds
+    cal = CalendarSettings.load()
     jobs = []
-    for person in project_assignees_workers(project):
-        jobs.append(
-            Job.objects.create(
-                project=project,
-                assigned_to=person,
-                starts_at=starts_at,
-                ends_at=ends_at,
-                created_by=user,
+    for period in periods:
+        bounds = job_datetimes(period.start_date, period.end_date, cal)
+        if not bounds:
+            continue
+        starts_at, ends_at = bounds
+        for person in workers:
+            jobs.append(
+                Job.objects.create(
+                    project=project,
+                    assigned_to=person,
+                    starts_at=starts_at,
+                    ends_at=ends_at,
+                    created_by=user,
+                )
             )
-        )
     return jobs
 
 
 def sync_project_jobs(project, user, previous=None):
-    bounds = project_job_bounds(project)
-    if not bounds:
+    seed_project_periods(project)
+    periods = list(project.periods.all())
+    workers = project_assignees_workers(project)
+    if not periods:
+        Job.objects.filter(project=project).exclude(
+            assigned_to_id__in={person.id for person in workers}
+        ).delete()
         return
-    starts_at, ends_at = bounds
-    old_start = (previous or {}).get("start_date") or project.start_date
-    old_end = (previous or {}).get("end_date") or project.end_date or old_start
-    new_end = project.end_date or project.start_date
-    wanted = project_assignees_workers(project)
-    wanted_ids = {person.id for person in wanted}
-
-    for person in wanted:
-        job = (
-            spanning_jobs(project, old_start, old_end).filter(assigned_to=person).first()
-            or spanning_jobs(project, project.start_date, new_end).filter(assigned_to=person).first()
-        )
-        if job:
-            job.starts_at = starts_at
-            job.ends_at = ends_at
-            job.save(update_fields=["starts_at", "ends_at", "updated_at"])
-        elif not Job.objects.filter(project=project, assigned_to=person).exists():
-            Job.objects.create(
-                project=project,
-                assigned_to=person,
-                starts_at=starts_at,
-                ends_at=ends_at,
-                created_by=user,
+    cal = CalendarSettings.load()
+    wanted_keys = set()
+    for period in periods:
+        bounds = job_datetimes(period.start_date, period.end_date, cal)
+        if not bounds:
+            continue
+        starts_at, ends_at = bounds
+        start_d, end_d = starts_at.date(), ends_at.date()
+        for person in workers:
+            wanted_keys.add((person.id, start_d, end_d))
+            job = (
+                Job.objects.filter(
+                    project=project,
+                    assigned_to=person,
+                    starts_at__date=start_d,
+                    ends_at__date=end_d,
+                ).first()
             )
-
-    spanning_jobs(project, old_start, old_end).exclude(assigned_to_id__in=wanted_ids).delete()
-    if old_start != project.start_date or old_end != new_end:
-        spanning_jobs(project, project.start_date, new_end).exclude(assigned_to_id__in=wanted_ids).delete()
+            if job:
+                if job.starts_at != starts_at or job.ends_at != ends_at:
+                    job.starts_at = starts_at
+                    job.ends_at = ends_at
+                    job.save(update_fields=["starts_at", "ends_at", "updated_at"])
+            else:
+                Job.objects.create(
+                    project=project,
+                    assigned_to=person,
+                    starts_at=starts_at,
+                    ends_at=ends_at,
+                    created_by=user,
+                )
+    stale = []
+    for job in Job.objects.filter(project=project):
+        start_d, end_d = job_local_dates(job)
+        if (job.assigned_to_id, start_d, end_d) not in wanted_keys:
+            stale.append(job.pk)
+    if stale:
+        Job.objects.filter(pk__in=stale).delete()
 
 
 class ProjectViewSet(
@@ -560,7 +680,16 @@ class ProjectViewSet(
         return ProjectListSerializer
 
     def get_permissions(self):
-        if self.action in ("create", "update", "partial_update", "close", "discard", "restore", "destroy"):
+        if self.action in (
+            "create",
+            "update",
+            "partial_update",
+            "close",
+            "discard",
+            "restore",
+            "destroy",
+            "add_needed_material",
+        ):
             return [IsAuthenticated(), IsAdminType()]
         return [IsAuthenticated()]
 
@@ -569,6 +698,7 @@ class ProjectViewSet(
             "created_by", "closed_by"
         ).prefetch_related(
             "assignees",
+            "periods",
             "needed_materials__material__warehouse",
             "needed_materials__material__project_needs__project",
             "needed_materials__material__spendings__project",
@@ -594,6 +724,7 @@ class ProjectViewSet(
         user = self.request.user
         tasks_payload = serializer.validated_data.pop("tasks", None) or []
         materials_payload = serializer.validated_data.pop("materials", None) or []
+        periods_payload = serializer.validated_data.pop("periods", None)
         name = (serializer.validated_data.get("name") or "").strip()
         client = (serializer.validated_data.get("client") or "").strip()
         if not name:
@@ -608,7 +739,10 @@ class ProjectViewSet(
                 status=Project.Status.OPEN,
             )
             apply_project_blueprint(project, user, tasks_payload, materials_payload)
+            if periods_payload is not None:
+                replace_project_periods(project, periods_payload)
             schedule_project_jobs(project, user)
+            clear_prefetch(project, "periods", "assignees")
         log_activity(
             user,
             "created",
@@ -629,6 +763,8 @@ class ProjectViewSet(
         }
         tasks_payload = serializer.validated_data.pop("tasks", None)
         materials_payload = serializer.validated_data.pop("materials", None)
+        periods_payload = serializer.validated_data.pop("periods", None)
+        dates_changed = any(key in serializer.validated_data for key in ("start_date", "end_date", "planned_days"))
         if "assignees" in serializer.validated_data:
             serializer.validated_data["assignees"] = [
                 person for person in serializer.validated_data["assignees"] if not is_admin(person)
@@ -642,7 +778,18 @@ class ProjectViewSet(
                     tasks_payload,
                     materials_payload,
                 )
+            if periods_payload is not None:
+                replace_project_periods(project, periods_payload)
+            elif dates_changed and project.periods.count() <= 1:
+                start = project.start_date
+                end = project.end_date or start
+                if start:
+                    replace_project_periods(
+                        project,
+                        [{"start_date": start, "end_date": end}],
+                    )
             sync_project_jobs(project, self.request.user, previous)
+            clear_prefetch(project, "periods", "assignees")
         log_activity(
             self.request.user,
             "updated",
@@ -1103,21 +1250,41 @@ class JobViewSet(
     def perform_create(self, serializer):
         user = self.request.user
         project = serializer.validated_data["project"]
+        people = list(serializer.validated_data.pop("assigned_to_ids", None) or [])
         assigned = serializer.validated_data.get("assigned_to")
         if not is_admin(user):
             if is_archived(project):
                 raise ValidationError({"project_id": "Nav piekļuves šim projektam."})
-            assigned = user
-        elif assigned is None:
-            assigned = user
-        job = serializer.save(created_by=user, assigned_to=assigned)
+            people = [user]
+        else:
+            if not people:
+                people = [assigned] if assigned else []
+            people = [person for person in people if person and not is_admin(person)]
+            if not people:
+                raise ValidationError({"assigned_to_ids": "Izvēlies darbinieku."})
+        first = people[0]
+        with transaction.atomic():
+            job = serializer.save(created_by=user, assigned_to=first)
+            for person in people[1:]:
+                Job.objects.create(
+                    project=project,
+                    assigned_to=person,
+                    starts_at=job.starts_at,
+                    ends_at=job.ends_at,
+                    created_by=user,
+                )
+            for person in people:
+                project.assignees.add(person)
+            start, end = job_local_dates(job)
+            ensure_project_period(project, start, end)
         when = timezone.localtime(job.starts_at).strftime("%Y-%m-%d %H:%M")
+        names = ", ".join(person.name for person in people if person.name)
         log_activity(
             user,
             "created",
             "job",
             job.id,
-            f"Izveidots darbs «{project.name}» ({when}), piešķirts {job.assigned_to.name}",
+            f"Izveidots darbs «{project.name}» ({when}), piešķirts {names}",
         )
 
     def perform_update(self, serializer):
@@ -1128,10 +1295,18 @@ class JobViewSet(
         project = serializer.validated_data.get("project", job.project)
         if not is_admin(user) and is_archived(project):
             raise ValidationError({"project_id": "Nav piekļuves šim projektam."})
-        if not is_admin(user):
-            serializer.save(assigned_to=user)
-        else:
-            serializer.save()
+        old_start, old_end = job_local_dates(job)
+        with transaction.atomic():
+            if not is_admin(user):
+                job = serializer.save(assigned_to=user)
+            else:
+                job = serializer.save()
+                assigned = job.assigned_to
+                if assigned and not is_admin(assigned):
+                    job.project.assignees.add(assigned)
+            start, end = job_local_dates(job)
+            if (start, end) != (old_start, old_end):
+                sync_job_period_dates(job, old_start, old_end)
         log_activity(
             user,
             "updated",
@@ -1144,6 +1319,8 @@ class JobViewSet(
         user = self.request.user
         if not is_admin(user) and instance.assigned_to_id != user.id and instance.created_by_id != user.id:
             raise ValidationError({"detail": "Nav piekļuves šim darbam."})
+        project = instance.project
+        start, end = job_local_dates(instance)
         log_activity(
             user,
             "deleted",
@@ -1151,7 +1328,9 @@ class JobViewSet(
             instance.id,
             f"Dzēsts darbs «{instance.project.name}»",
         )
-        instance.delete()
+        with transaction.atomic():
+            instance.delete()
+            drop_period_if_unused(project, start, end)
 
 
 class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
@@ -1401,7 +1580,7 @@ def overdue_schedule_items(user):
     qs = (
         Project.objects.exclude(status__in=Project.ARCHIVED_STATUSES)
         .filter(planned_days__isnull=False)
-        .prefetch_related("assignees")
+        .prefetch_related("assignees", "periods")
     )
     if not is_admin(user):
         qs = qs.filter(assignees=user)
@@ -1444,8 +1623,12 @@ def notification_items(user, *, log_limit=80, tool_limit=24):
         logs = logs.filter(user=user)
     if log_limit is not None:
         logs = logs[:log_limit]
+    report_ids_from_logs = set()
     for log in logs:
         kind, icon = notif_style(log.action)
+        refs = notif_entity_refs(log)
+        if refs.get("report_id"):
+            report_ids_from_logs.add(refs["report_id"])
         items.append(
             {
                 "id": f"log-{log.id}",
@@ -1457,9 +1640,37 @@ def notification_items(user, *, log_limit=80, tool_limit=24):
                 "unread": True,
                 "source": "activity",
                 "action": log.action,
-                **notif_entity_refs(log),
+                **refs,
             }
         )
+    if is_admin(user):
+        reports = (
+            DailyReport.objects.select_related("project", "recorded_by")
+            .order_by("-updated_at", "-id")
+        )
+        if log_limit is not None:
+            reports = reports[:log_limit]
+        for report in reports:
+            if report.id in report_ids_from_logs:
+                continue
+            person = report.recorded_by
+            items.append(
+                {
+                    "id": f"report-{report.id}",
+                    "kind": "green",
+                    "icon": "check",
+                    "title": f"Atskaite {report.work_date} · «{report.project.name}»",
+                    "sub": person.name if person else "",
+                    "created_at": (report.updated_at or report.created_at).isoformat(),
+                    "unread": True,
+                    "source": "activity",
+                    "action": "report_saved",
+                    "entity_type": "report",
+                    "entity_id": report.id,
+                    "report_id": report.id,
+                    "project_id": report.project_id,
+                }
+            )
     if is_admin(user):
         checks = (
             ProjectToolCheck.objects.filter(status=ProjectToolCheck.Status.NAV)

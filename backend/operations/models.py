@@ -117,11 +117,34 @@ class Project(models.Model):
             return timezone.localtime(created).date()
         return created.date()
 
+    def work_periods(self):
+        return list(self.periods.all())
+
     def elapsed_days(self, today=None):
+        today = today or timezone.localdate()
+        periods = self.work_periods()
+        if periods:
+            first_start = min(row.start_date for row in periods)
+            last_end = max(row.end_date or row.start_date for row in periods)
+            if today < first_start:
+                return 0
+            total = 0
+            for row in periods:
+                start = row.start_date
+                end = row.end_date or start
+                if end < start:
+                    end = start
+                if today < start:
+                    continue
+                last = min(today, end)
+                if last >= start:
+                    total += (last - start).days + 1
+            if today > last_end:
+                total += (today - last_end).days
+            return total
         start = self.schedule_start_date()
         if start is None:
             return None
-        today = today or timezone.localdate()
         if today < start:
             return 0
         return (today - start).days + 1
@@ -138,15 +161,58 @@ class Project(models.Model):
         return self.overdue_days(today) > 0
 
     def overdue_since(self):
-        start = self.schedule_start_date()
-        if not start or not self.planned_days:
+        if not self.planned_days:
             return None
-        day = start + timedelta(days=self.planned_days)
-        when = datetime.combine(day, time.min)
-        tz = timezone.get_current_timezone()
-        if timezone.is_naive(when):
-            return timezone.make_aware(when, tz)
-        return when
+        periods = self.work_periods()
+        if periods:
+            remaining = self.planned_days
+            last_end = None
+            for row in periods:
+                start = row.start_date
+                end = row.end_date or start
+                if end < start:
+                    end = start
+                length = (end - start).days + 1
+                last_end = end if last_end is None else max(last_end, end)
+                if remaining < length:
+                    return _aware_midnight(start + timedelta(days=remaining))
+                remaining -= length
+            if last_end is None:
+                return None
+            return _aware_midnight(last_end + timedelta(days=1))
+        start = self.schedule_start_date()
+        if not start:
+            return None
+        return _aware_midnight(start + timedelta(days=self.planned_days))
+
+
+def _aware_midnight(day):
+    when = datetime.combine(day, time.min)
+    tz = timezone.get_current_timezone()
+    if timezone.is_naive(when):
+        return timezone.make_aware(when, tz)
+    return when
+
+
+class ProjectPeriod(models.Model):
+    project = models.ForeignKey(
+        Project, on_delete=models.CASCADE, related_name="periods"
+    )
+    start_date = models.DateField()
+    end_date = models.DateField()
+
+    class Meta:
+        ordering = ["start_date", "id"]
+
+    def __str__(self):
+        return f"{self.project} {self.start_date}–{self.end_date}"
+
+    def length_days(self):
+        start = self.start_date
+        end = self.end_date or start
+        if end < start:
+            end = start
+        return (end - start).days + 1
 
 
 class ProjectMaterial(models.Model):

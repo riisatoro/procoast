@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, time
 from decimal import Decimal
 from pathlib import Path
 
@@ -9,7 +9,9 @@ from django.db import transaction
 from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
 
+from operations.activity import log_activity
 from operations.models import (
+    ActivityLog,
     CalendarHoliday,
     CalendarSettings,
     CoatingSystem,
@@ -21,6 +23,7 @@ from operations.models import (
     MaterialSpending,
     Project,
     ProjectMaterial,
+    ProjectPeriod,
     ProjectTask,
     Tool,
     ToolType,
@@ -73,6 +76,7 @@ class Command(BaseCommand):
             projects = self.load_projects(data.get("projects") or [], users, materials)
             self.load_jobs(data.get("jobs") or [], projects, users)
             self.load_reports(data.get("reports") or [], projects, users)
+            self.stamp_spendings(projects)
         self.stdout.write(self.style.SUCCESS(f"Loaded dump from {path.name}"))
 
     def actor(self, users):
@@ -280,6 +284,13 @@ class Command(BaseCommand):
                     "closed_by": actor if status == Project.Status.CLOSED else None,
                 },
             )
+            if start_date:
+                existing_periods = list(project.periods.all())
+                if len(existing_periods) <= 1:
+                    period = existing_periods[0] if existing_periods else ProjectPeriod(project=project)
+                    period.start_date = start_date
+                    period.end_date = end_date or start_date
+                    period.save()
             for order, task in enumerate(row.get("tasks") or []):
                 name = (task.get("name") or "").strip()
                 if not name:
@@ -346,12 +357,22 @@ class Command(BaseCommand):
             work_date = parse_date(str(row.get("work_date") or ""))
             if not project or not person or not work_date:
                 continue
-            report, _ = DailyReport.objects.update_or_create(
+            report, created = DailyReport.objects.update_or_create(
                 project=project,
                 recorded_by=person,
                 work_date=work_date,
                 defaults={"notes": row.get("notes") or ""},
             )
+            if created or not ActivityLog.objects.filter(
+                action="report_saved", entity_type="report", entity_id=report.id
+            ).exists():
+                log_activity(
+                    person,
+                    "report_saved",
+                    "report",
+                    report.id,
+                    f"Atskaite {work_date} · «{project.name}»",
+                )
             keep = []
             for line in row.get("task_lines") or []:
                 task = ProjectTask.objects.filter(project=project, name=line.get("task")).first()
@@ -364,3 +385,21 @@ class Command(BaseCommand):
                 )
                 keep.append(obj.id)
             DailyReportTask.objects.filter(report=report).exclude(id__in=keep).delete()
+
+    def stamp_spendings(self, projects):
+        tz = timezone.get_current_timezone()
+        for project in projects.values():
+            candidates = []
+            report = project.daily_reports.order_by("work_date").first()
+            if report:
+                candidates.append(report.work_date)
+            job = project.jobs.order_by("starts_at").first()
+            if job:
+                local = timezone.localtime(job.starts_at)
+                candidates.append(local.date())
+            if project.start_date:
+                candidates.append(project.start_date)
+            if not candidates:
+                continue
+            when = timezone.make_aware(datetime.combine(min(candidates), time(9, 0)), tz)
+            MaterialSpending.objects.filter(project=project).update(created_at=when)

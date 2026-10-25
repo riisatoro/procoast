@@ -122,6 +122,7 @@ const ProjectForm = ({ users, onClose, onSave }) => {
             </label>
             <label className="field">
               <span className="field-label">{t("projects.assigneeField")}</span>
+              <span className="muted small">{t("projects.assigneeHint")}</span>
               <AssigneePicker
                 users={users}
                 value={form.assigned_to_ids}
@@ -459,10 +460,10 @@ const ProjectDetail = ({ user, projectId, onBack, onEdit, readOnly }) => {
               const stock = Number(m?.stock || 0);
               return (
                 <tr key={row.id}>
-                  <td>{m?.name} <span className="muted small">{m?.color}</span></td>
-                  <td className="muted small">{m?.warehouse_name}</td>
-                  <td className="mono">{row.quantity_needed} {m?.unit}</td>
-                  <td>
+                  <td data-label={t("common.material")}>{m?.name} <span className="muted small">{m?.color}</span></td>
+                  <td className="muted small" data-label={t("projects.warehouse")}>{m?.warehouse_name}</td>
+                  <td className="mono" data-label={t("projects.need")}>{row.quantity_needed} {m?.unit}</td>
+                  <td data-label={t("projects.spent")}>
                     {closed ? (
                       <span className="mono">{used} {m?.unit}</span>
                     ) : (
@@ -486,7 +487,7 @@ const ProjectDetail = ({ user, projectId, onBack, onEdit, readOnly }) => {
           </tbody>
         </table>
         </div>
-        {!closed && (
+        {isAdmin && !closed && (
           <div className="field-row two" style={{ marginTop: 14 }}>
             <select className="select" value={need.material} onChange={(e) => setNeed({ ...need, material: e.target.value })}>
               <option value="">{t("common.material")}</option>
@@ -524,9 +525,9 @@ const ProjectDetail = ({ user, projectId, onBack, onEdit, readOnly }) => {
               const tool = row.tool_detail;
               return (
                 <tr key={row.id}>
-                  <td>{tool?.name}</td>
-                  <td className="muted small">{tool?.tool_type_name}</td>
-                  <td className="mono">{row.quantity} {tool?.unit}</td>
+                  <td data-label={t("tools.tool")}>{tool?.name}</td>
+                  <td className="muted small" data-label={t("tools.type")}>{tool?.tool_type_name}</td>
+                  <td className="mono" data-label={t("tools.amount")}>{row.quantity} {tool?.unit}</td>
                   <td>
                     {row.released_at
                       ? <span className="status status-completed">{t("projects.released")}</span>
@@ -594,9 +595,9 @@ const ProjectDetail = ({ user, projectId, onBack, onEdit, readOnly }) => {
                   const amt = Number(e.amount || 0);
                   return (
                     <tr key={e.id}>
-                      <td className="dt-name">{e.title}</td>
-                      <td className="muted small">{e.note || e.recorded_by?.name || t("common.dash")}</td>
-                      <td>
+                      <td className="dt-name" data-label={t("common.name")}>{e.title}</td>
+                      <td className="muted small" data-label={t("common.note")}>{e.note || e.recorded_by?.name || t("common.dash")}</td>
+                      <td data-label={t("projects.amount")}>
                         {closed ? (
                           <span className="mono">{amt.toFixed(2)} €</span>
                         ) : (

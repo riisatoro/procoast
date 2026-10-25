@@ -12,8 +12,8 @@ import {
   settingsToApi,
   ymd,
 } from "./cal-settings";
-import { createJob, fetchCalendarSettings, fetchJobs, fetchProjects, fetchUsers, saveCalendarSettings } from "./api";
-import { assigneeNames, projectAssignees, workerUsers } from "./assignees";
+import { createJob, deleteJob, fetchCalendarSettings, fetchJobs, fetchProjects, fetchUsers, saveCalendarSettings, updateJob } from "./api";
+import { AssigneePicker, assigneeNames, isAdminUser, projectAssignees, workerUsers } from "./assignees";
 import { useI18n } from "./i18n";
 
 const PALETTE = ["#2C5F2E", "#5B7DB1", "#F4A442", "#A66A8E", "#6E5B8A", "#7A8B5C", "#B85C5C", "#5C8B8B"];
@@ -117,6 +117,30 @@ const buildMonthGrid = (year, month, firstDay) => {
 
 const rangesOverlap = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
 
+const uniqueJobs = (rows) => {
+  const seen = new Map();
+  (rows || []).forEach((job) => {
+    if (job?.id && !seen.has(job.id)) seen.set(job.id, job);
+  });
+  return [...seen.values()];
+};
+
+const clockFromIso = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+
+const assigneesFromProject = (project, fallbackId) => {
+  const ids = projectAssignees(project)
+    .filter((person) => !isAdminUser(person))
+    .map((person) => Number(person.id))
+    .filter(Boolean);
+  if (ids.length) return ids;
+  return fallbackId ? [Number(fallbackId)] : [];
+};
+
 const CalendarView = ({ user, onSelectObject }) => {
   const { t, dateLocale } = useI18n();
   const isAdmin = user.role === "ADMINISTRATORS";
@@ -125,7 +149,7 @@ const CalendarView = ({ user, onSelectObject }) => {
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
-  const [showAdd, setShowAdd] = useState(false);
+  const [jobModal, setJobModal] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null);
   const [jobs, setJobs] = useState([]);
@@ -257,7 +281,13 @@ const CalendarView = ({ user, onSelectObject }) => {
 
   const openAdd = (date) => {
     setSelectedDate(date || ymd(today));
-    setShowAdd(true);
+    setJobModal({ mode: "add", date: date || ymd(today) });
+  };
+
+  const openEdit = (group) => {
+    const rows = uniqueJobs(group?.jobs);
+    if (!rows.length) return;
+    setJobModal({ mode: "edit", jobs: rows });
   };
 
   const showToast = (msg) => {
@@ -341,6 +371,7 @@ const CalendarView = ({ user, onSelectObject }) => {
 
       {err && <div className="login-err" style={{ marginBottom: 12 }}>{err}</div>}
 
+      <div className="cal-scroll">
       <div className="cal-grid">
         <div className="cal-head-row">
           {dayLabels.map((d, i) => (
@@ -390,7 +421,13 @@ const CalendarView = ({ user, onSelectObject }) => {
                           border: 0,
                           cursor: project?.id ? "pointer" : "default",
                         }}
-                        onClick={() => project?.id && onSelectObject && onSelectObject(project.id)}
+                        onClick={() => {
+                          if (isAdmin && group.jobs?.length) {
+                            openEdit(group);
+                            return;
+                          }
+                          if (project?.id && onSelectObject) onSelectObject(project.id);
+                        }}
                       >
                         <span className="cal-event-workers mono">{groupTimeLabel(group, dateLocale)}</span>
                         <span className="cal-event-title">{project?.name}</span>
@@ -419,27 +456,30 @@ const CalendarView = ({ user, onSelectObject }) => {
           })}
         </div>
       </div>
+      </div>
 
       {!loading && visibleJobs.length === 0 && (
         <p className="muted small" style={{ marginTop: 12 }}>{t("calendar.noJobs")}</p>
       )}
 
-      {showAdd && (
-        <AddJobModal
+      {jobModal && (
+        <JobModal
           user={user}
           isAdmin={isAdmin}
           projects={projects}
           users={users}
           jobs={jobs}
           settings={settings}
-          initialDate={selectedDate}
+          mode={jobModal.mode}
+          editingJobs={jobModal.jobs || []}
+          initialDate={jobModal.date || selectedDate}
           initialWorkerId={workerFilter !== "all" ? workerFilter : users[0]?.id}
           initialProjectId={projectFilter !== "all" ? projectFilter : undefined}
-          onClose={() => setShowAdd(false)}
-          onCreated={async () => {
-            setShowAdd(false);
+          onClose={() => setJobModal(null)}
+          onSaved={async (kind) => {
+            setJobModal(null);
             await load();
-            showToast(t("calendar.created"));
+            showToast(t(kind === "deleted" ? "calendar.deleted" : kind === "updated" ? "calendar.saved" : "calendar.created"));
           }}
         />
       )}
@@ -468,16 +508,56 @@ const CalendarView = ({ user, onSelectObject }) => {
   );
 };
 
-const AddJobModal = ({ user, isAdmin, projects, users, jobs, settings, initialDate, initialWorkerId, initialProjectId, onClose, onCreated }) => {
+const JobModal = ({
+  user,
+  isAdmin,
+  projects,
+  users,
+  jobs,
+  settings,
+  mode,
+  editingJobs,
+  initialDate,
+  initialWorkerId,
+  initialProjectId,
+  onClose,
+  onSaved,
+}) => {
   const { t } = useI18n();
-  const [projectId, setProjectId] = useState(initialProjectId || projects[0]?.id || "");
-  const [date, setDate] = useState(initialDate || ymd(new Date()));
-  const [endDate, setEndDate] = useState(initialDate || ymd(new Date()));
-  const [time, setTime] = useState(settings.workStart || "08:00");
-  const [endTime, setEndTime] = useState(settings.workEnd || "17:00");
-  const [assignedTo, setAssignedTo] = useState(initialWorkerId || users[0]?.id || "");
+  const editing = mode === "edit" && (editingJobs || []).length > 0;
+  const firstJob = editing ? editingJobs[0] : null;
+  const [projectId, setProjectId] = useState(
+    firstJob?.project?.id || initialProjectId || projects[0]?.id || ""
+  );
+  const [date, setDate] = useState(
+    firstJob ? jobDay(firstJob.starts_at) : (initialDate || ymd(new Date()))
+  );
+  const [endDate, setEndDate] = useState(
+    firstJob ? jobDay(firstJob.ends_at || firstJob.starts_at) : (initialDate || ymd(new Date()))
+  );
+  const [time, setTime] = useState(
+    firstJob ? clockFromIso(firstJob.starts_at) : (settings.workStart || "08:00")
+  );
+  const [endTime, setEndTime] = useState(
+    firstJob ? clockFromIso(firstJob.ends_at || firstJob.starts_at) : (settings.workEnd || "17:00")
+  );
+  const [assigneeIds, setAssigneeIds] = useState(() => {
+    if (!isAdmin) return user?.id ? [Number(user.id)] : [];
+    if (editing) {
+      return [...new Set(editingJobs.map((job) => Number(job.assigned_to?.id)).filter(Boolean))];
+    }
+    const picked = projects.find((row) => String(row.id) === String(initialProjectId || projects[0]?.id));
+    return assigneesFromProject(picked, initialWorkerId);
+  });
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (editing || !isAdmin) return;
+    const picked = projects.find((row) => String(row.id) === String(projectId));
+    const ids = assigneesFromProject(picked, initialWorkerId);
+    if (ids.length) setAssigneeIds(ids);
+  }, [projectId, editing, isAdmin, projects, initialWorkerId]);
 
   const projectOptions = projects.map((p) => ({
     id: p.id,
@@ -485,15 +565,10 @@ const AddJobModal = ({ user, isAdmin, projects, users, jobs, settings, initialDa
     sub: [p.client, assigneeNames(p)].filter(Boolean).join(" · "),
   }));
 
-  const workerOptions = users.map((u) => ({
-    id: u.id,
-    label: u.name,
-    sub: u.initials,
-  }));
-
   const submit = async (e) => {
     e.preventDefault();
-    if (!projectId || !date || !time) {
+    const workerIds = isAdmin ? assigneeIds.map(Number).filter(Boolean) : (user?.id ? [Number(user.id)] : []);
+    if (!projectId || !date || !time || !workerIds.length) {
       setErr(t("calendar.fillRequired"));
       return;
     }
@@ -518,14 +593,15 @@ const AddJobModal = ({ user, isAdmin, projects, users, jobs, settings, initialDa
       setErr(t("calendar.endBeforeStart"));
       return;
     }
-    const workerId = Number(isAdmin ? assignedTo : user.id);
+    const editingIds = new Set((editingJobs || []).map((job) => Number(job.id)));
     if (!settings.allowOverlap) {
-      const clash = jobs.some((job) => {
+      const clash = workerIds.some((workerId) => jobs.some((job) => {
+        if (editingIds.has(Number(job.id))) return false;
         if (Number(job.assigned_to?.id) !== workerId) return false;
         const bStart = new Date(job.starts_at);
         const bEnd = job.ends_at ? new Date(job.ends_at) : new Date(bStart.getTime() + 8 * 3600000);
         return rangesOverlap(startIso, finishIso, bStart, bEnd);
-      });
+      }));
       if (clash) {
         setErr(t("calendar.overlap"));
         return;
@@ -536,14 +612,47 @@ const AddJobModal = ({ user, isAdmin, projects, users, jobs, settings, initialDa
     try {
       const payload = {
         project_id: Number(projectId),
-        assigned_to_id: workerId,
         starts_at: `${startDate}T${time}:00`,
         ends_at: `${finishDate}T${endTime || settings.workEnd || "17:00"}:00`,
       };
-      await createJob(payload);
-      await onCreated();
+      if (editing) {
+        const byWorker = new Map(
+          editingJobs.map((job) => [Number(job.assigned_to?.id), job])
+        );
+        for (const workerId of workerIds) {
+          const existing = byWorker.get(workerId);
+          if (existing) {
+            await updateJob(existing.id, { ...payload, assigned_to_id: workerId });
+            byWorker.delete(workerId);
+          } else {
+            await createJob({ ...payload, assigned_to_ids: [workerId] });
+          }
+        }
+        for (const leftover of byWorker.values()) {
+          await deleteJob(leftover.id);
+        }
+        await onSaved("updated");
+      } else {
+        await createJob({ ...payload, assigned_to_ids: workerIds });
+        await onSaved("created");
+      }
     } catch (error) {
       setErr(error.message || t("common.saveFailed"));
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!editing || !confirm(t("calendar.confirmDelete"))) return;
+    setBusy(true);
+    setErr("");
+    try {
+      for (const job of editingJobs) {
+        await deleteJob(job.id);
+      }
+      await onSaved("deleted");
+    } catch (error) {
+      setErr(error.message || t("api.deleteJob"));
       setBusy(false);
     }
   };
@@ -553,8 +662,8 @@ const AddJobModal = ({ user, isAdmin, projects, users, jobs, settings, initialDa
       <div className="modal modal-dropdown" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <div>
-            <div className="modal-eyebrow">{t("calendar.addEyebrow")}</div>
-            <h3 className="modal-title">{t("calendar.addTitle")}</h3>
+            <div className="modal-eyebrow">{t(editing ? "calendar.editEyebrow" : "calendar.addEyebrow")}</div>
+            <h3 className="modal-title">{t(editing ? "calendar.editTitle" : "calendar.addTitle")}</h3>
           </div>
           <button className="icon-btn" type="button" onClick={onClose}>
             <Icon name="x" size={16} />
@@ -600,13 +709,9 @@ const AddJobModal = ({ user, isAdmin, projects, users, jobs, settings, initialDa
                 </div>
                 {isAdmin && (
                   <label className="field">
-                    <span className="field-label">{t("calendar.assignee")}</span>
-                    <SearchableSelect
-                      options={workerOptions}
-                      value={assignedTo}
-                      onChange={setAssignedTo}
-                      placeholder={t("calendar.searchWorkers")}
-                    />
+                    <span className="field-label">{t("calendar.workers")}</span>
+                    <span className="muted small">{t("projects.assigneeHint")}</span>
+                    <AssigneePicker users={users} value={assigneeIds} onChange={setAssigneeIds} />
                   </label>
                 )}
               </>
@@ -614,6 +719,11 @@ const AddJobModal = ({ user, isAdmin, projects, users, jobs, settings, initialDa
             {err && <div className="login-err">{err}</div>}
           </div>
           <footer className="modal-foot">
+            {editing && isAdmin && (
+              <button type="button" className="btn btn-danger" disabled={busy} onClick={remove}>
+                <Icon name="trash" size={15} /> {t("common.delete")}
+              </button>
+            )}
             <button type="button" className="btn btn-ghost" onClick={onClose}>{t("common.cancel")}</button>
             <button type="submit" className="btn btn-primary" disabled={busy || projects.length === 0}>
               <Icon name="save" size={15} /> {busy ? t("common.saving") : t("calendar.saveEntry")}

@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 from operations.models import (
     ActivityLog,
     DailyReport,
+    DailyReportMaterial,
     DailyReportTask,
     Expense,
     Job,
@@ -138,6 +139,139 @@ def _project_done_m2(project):
     return (sum(pcts) / len(pcts) * volume).quantize(Decimal("0.01")) if volume else Decimal("0")
 
 
+def _report_card(report):
+    person = report.recorded_by
+    parts = []
+    for line in report.task_lines.all():
+        if line.quantity:
+            unit = line.task.unit if line.task_id else ""
+            name = line.task.name if line.task_id else ""
+            parts.append(f"{line.quantity} {unit} {name}".strip())
+    for line in report.material_lines.all():
+        if line.quantity:
+            mat = line.material
+            parts.append(f"{line.quantity} {mat.unit} {mat.name}")
+    return {
+        "id": report.id,
+        "object_id": report.project_id,
+        "client": report.project.client or report.project.name,
+        "project_name": report.project.name,
+        "address": report.project.address,
+        "system": report.project.system,
+        "color": report.project.color,
+        "worker": person.initials if person else "",
+        "worker_name": person.name if person else "",
+        "notes": report.notes or "",
+        "work_date": report.work_date.isoformat(),
+        "tasks": [
+            {
+                "id": line.id,
+                "name": line.task.name if line.task_id else "",
+                "quantity": str(line.quantity),
+                "unit": line.task.unit if line.task_id else "m²",
+            }
+            for line in report.task_lines.all()
+            if line.quantity
+        ],
+        "materials": [
+            {
+                "id": line.id,
+                "name": line.material.name,
+                "color": line.material.color or "",
+                "quantity": str(line.quantity),
+                "unit": line.material.unit,
+            }
+            for line in report.material_lines.all()
+            if line.quantity
+        ],
+        "summary": ", ".join(parts[:4]),
+        "created_at": report.created_at.isoformat(),
+        "updated_at": report.updated_at.isoformat() if report.updated_at else None,
+    }
+
+
+def _spent_in_period(start_date, end_date, start, end):
+    spent_map = {}
+    report_lines = DailyReportMaterial.objects.filter(
+        report__work_date__range=(start_date, end_date)
+    )
+    for row in report_lines.values("material_id").annotate(spent=Sum("quantity")):
+        spent_map[row["material_id"]] = row["spent"] or Decimal("0")
+    linked_ids = list(
+        report_lines.exclude(spending_id=None).values_list("spending_id", flat=True)
+    )
+    warehouse_qs = MaterialSpending.objects.filter(created_at__range=(start, end))
+    if linked_ids:
+        warehouse_qs = warehouse_qs.exclude(id__in=linked_ids)
+    for row in warehouse_qs.values("material_id").annotate(spent=Sum("quantity")):
+        spent_map[row["material_id"]] = (spent_map.get(row["material_id"]) or Decimal("0")) + (
+            row["spent"] or Decimal("0")
+        )
+    return spent_map
+
+
+def _material_usage(start_date, end_date, start, end, active_statuses):
+    needed_rows = list(
+        ProjectMaterial.objects.filter(project__status__in=active_statuses)
+        .values(
+            "material_id",
+            "material__name",
+            "material__color",
+            "material__unit",
+            "material__stock",
+        )
+        .annotate(needed=Sum("quantity_needed"))
+        .order_by("-needed")
+    )
+    spent_map = _spent_in_period(start_date, end_date, start, end)
+    usage = []
+    seen = set()
+    shortages = 0
+    for row in needed_rows:
+        material_id = row["material_id"]
+        needed = row["needed"] or Decimal("0")
+        spent = spent_map.get(material_id) or Decimal("0")
+        stock = row["material__stock"] or Decimal("0")
+        remaining = needed - spent
+        if remaining > stock:
+            shortages += 1
+        seen.add(material_id)
+        usage.append(
+            {
+                "id": material_id,
+                "name": row["material__name"],
+                "color": row["material__color"] or "",
+                "unit": row["material__unit"],
+                "needed": _dec(needed),
+                "spent": _dec(spent),
+                "stock": _dec(stock),
+            }
+        )
+    extra_ids = [mid for mid in spent_map if mid not in seen and spent_map[mid]]
+    if extra_ids:
+        extras = Material.objects.filter(id__in=extra_ids).values(
+            "id", "name", "color", "unit", "stock"
+        )
+        extra_by_id = {row["id"]: row for row in extras}
+        for material_id in extra_ids:
+            row = extra_by_id.get(material_id)
+            if not row:
+                continue
+            usage.append(
+                {
+                    "id": material_id,
+                    "name": row["name"],
+                    "color": row["color"] or "",
+                    "unit": row["unit"],
+                    "needed": "0",
+                    "spent": _dec(spent_map[material_id]),
+                    "stock": _dec(row["stock"]),
+                }
+            )
+    usage.sort(key=lambda row: Decimal(row["needed"] or 0), reverse=True)
+    return usage[:8], shortages
+
+
 class DashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -197,46 +331,9 @@ class DashboardStatsView(APIView):
         )["total"]
         tool_available = (tool_stock or Decimal("0")) - (tool_borrowed or Decimal("0"))
 
-        needed_rows = list(
-            ProjectMaterial.objects.filter(project__status__in=active_statuses)
-            .values(
-                "material_id",
-                "material__name",
-                "material__color",
-                "material__unit",
-                "material__stock",
-            )
-            .annotate(needed=Sum("quantity_needed"))
-            .order_by("-needed")
+        material_usage, shortages = _material_usage(
+            start_date, end_date, start, end, active_statuses
         )
-        spent_map = {
-            row["material_id"]: row["spent"]
-            for row in MaterialSpending.objects.filter(
-                project__status__in=active_statuses
-            )
-            .values("material_id")
-            .annotate(spent=Sum("quantity"))
-        }
-        material_usage = []
-        shortages = 0
-        for row in needed_rows:
-            needed = row["needed"] or Decimal("0")
-            spent = spent_map.get(row["material_id"]) or Decimal("0")
-            stock = row["material__stock"] or Decimal("0")
-            remaining = needed - spent
-            if remaining > stock:
-                shortages += 1
-            material_usage.append(
-                {
-                    "id": row["material_id"],
-                    "name": row["material__name"],
-                    "color": row["material__color"] or "",
-                    "unit": row["material__unit"],
-                    "needed": _dec(needed),
-                    "spent": _dec(spent),
-                    "stock": _dec(stock),
-                }
-            )
 
         project_order = {
             Project.Status.IN_PROGRESS: 0,
@@ -318,6 +415,7 @@ class DashboardStatsView(APIView):
         ever_m2 += deleted_m2 or Decimal("0")
         avg_progress = int((done_m2 / total_m2 * 100).quantize(Decimal("1"))) if total_m2 else 0
 
+        today = timezone.localdate()
         period_jobs = [
             _job_card(job)
             for job in (
@@ -326,64 +424,23 @@ class DashboardStatsView(APIView):
                 .order_by("starts_at", "id")[:200]
             )
         ]
-
-        today_reports = []
-        for report in (
-            DailyReport.objects.filter(work_date__range=(start_date, end_date))
-            .select_related("project", "recorded_by")
-            .prefetch_related("task_lines__task", "material_lines__material")
-            .order_by("-updated_at")[:12]
-        ):
-            person = report.recorded_by
-            parts = []
-            for line in report.task_lines.all():
-                if line.quantity:
-                    unit = line.task.unit if line.task_id else ""
-                    name = line.task.name if line.task_id else ""
-                    parts.append(f"{line.quantity} {unit} {name}".strip())
-            for line in report.material_lines.all():
-                if line.quantity:
-                    mat = line.material
-                    parts.append(f"{line.quantity} {mat.unit} {mat.name}")
-            today_reports.append(
-                {
-                    "id": report.id,
-                    "object_id": report.project_id,
-                    "client": report.project.client or report.project.name,
-                    "project_name": report.project.name,
-                    "address": report.project.address,
-                    "system": report.project.system,
-                    "color": report.project.color,
-                    "worker": person.initials if person else "",
-                    "worker_name": person.name if person else "",
-                    "notes": report.notes or "",
-                    "work_date": report.work_date.isoformat(),
-                    "tasks": [
-                        {
-                            "id": line.id,
-                            "name": line.task.name if line.task_id else "",
-                            "quantity": str(line.quantity),
-                            "unit": line.task.unit if line.task_id else "m²",
-                        }
-                        for line in report.task_lines.all()
-                        if line.quantity
-                    ],
-                    "materials": [
-                        {
-                            "id": line.id,
-                            "name": line.material.name,
-                            "color": line.material.color or "",
-                            "quantity": str(line.quantity),
-                            "unit": line.material.unit,
-                        }
-                        for line in report.material_lines.all()
-                        if line.quantity
-                    ],
-                    "summary": ", ".join(parts[:4]),
-                    "created_at": report.created_at.isoformat(),
-                    "updated_at": report.updated_at.isoformat() if report.updated_at else None,
-                }
+        today_jobs = [
+            _job_card(job)
+            for job in (
+                _jobs_in_period(today, today)
+                .select_related("project", "assigned_to")
+                .order_by("starts_at", "id")[:200]
             )
+        ]
+        today_reports = [
+            _report_card(report)
+            for report in (
+                DailyReport.objects.filter(work_date=today)
+                .select_related("project", "recorded_by")
+                .prefetch_related("task_lines__task", "material_lines__material")
+                .order_by("-updated_at")[:12]
+            )
+        ]
 
         activity = ActivityLog.objects.select_related("user").filter(
             created_at__range=(start, end)
@@ -430,9 +487,9 @@ class DashboardStatsView(APIView):
                     "tools_borrowed": _dec(tool_borrowed),
                     "tools_available": _dec(tool_available),
                 },
-                "material_usage": material_usage[:8],
+                "material_usage": material_usage,
                 "period_jobs": period_jobs,
-                "today_jobs": period_jobs,
+                "today_jobs": today_jobs,
                 "today_reports": today_reports,
                 "activity": ActivityLogSerializer(activity, many=True).data,
             }

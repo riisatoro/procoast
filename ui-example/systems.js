@@ -6,6 +6,7 @@ window.PROCOAT_SYSTEMS = [
     needsColor: true,
     layers: [
       { name: "EP02 vai EP02 Color", perM2: 0.5, role: "Grunts" },
+      { name: "EP02 vai EP02 Color", perM2: 0.5, role: "Papildu grunts", optional: true, note: "Papildu grunts kārta" },
       { name: "EP02 vai EP02 Color", perM2: 0.5, role: "2. kārta" },
       { name: "EP02 (ja estrich)", perM2: 0.5, optional: true, note: "Ja estrich" },
       { name: "EP11", perM2: 2.5, role: "Izlīdzinošais slānis" },

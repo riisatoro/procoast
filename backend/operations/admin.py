@@ -16,6 +16,7 @@ from .models import (
     NotificationRead,
     Project,
     ProjectMaterial,
+    ProjectPeriod,
     ProjectTask,
     ProjectTool,
     ProjectToolCheck,
@@ -78,6 +79,11 @@ class ProjectTaskInline(admin.TabularInline):
     extra = 0
 
 
+class ProjectPeriodInline(admin.TabularInline):
+    model = ProjectPeriod
+    extra = 0
+
+
 class SpendingInline(admin.TabularInline):
     model = MaterialSpending
     extra = 0
@@ -101,6 +107,7 @@ class ProjectAdmin(admin.ModelAdmin):
     filter_horizontal = ("assignees",)
     inlines = [
         ProjectMaterialInline,
+        ProjectPeriodInline,
         ProjectTaskInline,
         ProjectToolInline,
         ProjectToolCheckInline,

@@ -154,6 +154,7 @@ const Archive = ({ user, onSelectObject, onOpenReport, onProjectsChanged }) => {
             </div>
           )
         ) : (
+          <div className="table-scroll">
           <table className="table">
             <thead>
               <tr>
@@ -176,18 +177,18 @@ const Archive = ({ user, onSelectObject, onOpenReport, onProjectsChanged }) => {
                     <td>
                       <span className="obj-dot" style={{ background: p.color || "#2C5F2E", width: 12, height: 12, display: "inline-block" }} />
                     </td>
-                    <td>
+                    <td data-label={t("archive.project")}>
                       <strong>#{p.id}</strong> {p.client || p.name}
                       <div className="muted small">{p.address}</div>
                     </td>
-                    <td>{p.system || t("common.dash")}</td>
-                    <td className="mono">{num(p.total_m2)} m²</td>
-                    <td>
+                    <td data-label={t("archive.system")}>{p.system || t("common.dash")}</td>
+                    <td className="mono" data-label={t("archive.volume")}>{num(p.total_m2)} m²</td>
+                    <td data-label={t("archive.reason")}>
                       <span className={objectStatusClass(deletedRow ? "deleted" : "closed")}>
                         {t(OBJECT_STATUS_LABEL[reasonKey])}
                       </span>
                     </td>
-                    <td className="mono small">
+                    <td className="mono small" data-label={t("archive.date")}>
                       {archivedAt ? new Date(archivedAt).toLocaleDateString(dateLocale) : t("common.dash")}
                     </td>
                     <td className="ta-r">
@@ -197,7 +198,7 @@ const Archive = ({ user, onSelectObject, onOpenReport, onProjectsChanged }) => {
                         </button>
                       ) : (
                         <button className="icon-btn sm" title={t("common.view")} onClick={() => onSelectObject && onSelectObject(p.id)}>
-                          <Icon name="edit" size={13} />
+                          <Icon name="eye" size={13} />
                         </button>
                       )}
                       <button className="icon-btn sm danger" title={t("archive.purge")} onClick={() => purge(p)}>
@@ -214,6 +215,7 @@ const Archive = ({ user, onSelectObject, onOpenReport, onProjectsChanged }) => {
               )}
             </tbody>
           </table>
+          </div>
         )}
       </section>
     </div>

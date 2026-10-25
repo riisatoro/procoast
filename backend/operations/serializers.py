@@ -21,6 +21,7 @@ from .models import (
     MaterialSpending,
     Project,
     ProjectMaterial,
+    ProjectPeriod,
     ProjectTask,
     ProjectTool,
     ProjectToolCheck,
@@ -363,6 +364,23 @@ class MaterialSpendingSerializer(serializers.ModelSerializer):
         read_only_fields = ("created_at",)
 
 
+class ProjectPeriodSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProjectPeriod
+        fields = ("id", "start_date", "end_date")
+        extra_kwargs = {"id": {"read_only": True}}
+
+    def validate(self, attrs):
+        start = attrs.get("start_date")
+        end = attrs.get("end_date") or start
+        if start and end and end < start:
+            raise serializers.ValidationError(
+                {"end_date": "Beigu datums nevar būt pirms sākuma."}
+            )
+        attrs["end_date"] = end
+        return attrs
+
+
 class ProjectListSerializer(serializers.ModelSerializer):
     assigned_to = UserBriefSerializer(source="assignees", many=True, read_only=True)
     assigned_to_ids = serializers.PrimaryKeyRelatedField(
@@ -372,6 +390,7 @@ class ProjectListSerializer(serializers.ModelSerializer):
         write_only=True,
         required=False,
     )
+    periods = ProjectPeriodSerializer(many=True, required=False)
     assigned_to_id = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.all(),
         write_only=True,
@@ -400,6 +419,7 @@ class ProjectListSerializer(serializers.ModelSerializer):
             "start_date",
             "end_date",
             "planned_days",
+            "periods",
             "elapsed_days",
             "planned_days_exceeded",
             "overdue_days",
@@ -458,7 +478,21 @@ class ProjectListSerializer(serializers.ModelSerializer):
         planned = attrs["planned_days"] if "planned_days" in attrs else getattr(self.instance, "planned_days", None)
         start = attrs["start_date"] if "start_date" in attrs else getattr(self.instance, "start_date", None)
         end = attrs["end_date"] if "end_date" in attrs else getattr(self.instance, "end_date", None)
-        if planned and start and not end:
+        periods = attrs.get("periods")
+        if periods:
+            starts = [row["start_date"] for row in periods if row.get("start_date")]
+            ends = [
+                row.get("end_date") or row["start_date"]
+                for row in periods
+                if row.get("start_date")
+            ]
+            if starts:
+                attrs["start_date"] = min(starts)
+                attrs["end_date"] = max(ends)
+                attrs["planned_days"] = sum(
+                    (finish - begin).days + 1 for begin, finish in zip(starts, ends)
+                )
+        elif planned and start and not end:
             attrs["end_date"] = start + timedelta(days=int(planned) - 1)
         single = attrs.pop("assigned_to_id", None)
         if single is not None:
@@ -631,6 +665,12 @@ class JobSerializer(serializers.ModelSerializer):
         queryset=User.objects.filter(is_active=True),
         required=False,
     )
+    assigned_to_ids = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.filter(is_active=True),
+        many=True,
+        write_only=True,
+        required=False,
+    )
     created_by = UserBriefSerializer(read_only=True)
 
     class Meta:
@@ -641,6 +681,7 @@ class JobSerializer(serializers.ModelSerializer):
             "project_id",
             "assigned_to",
             "assigned_to_id",
+            "assigned_to_ids",
             "starts_at",
             "ends_at",
             "created_by",
@@ -648,6 +689,14 @@ class JobSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("created_at", "updated_at")
+
+    def create(self, validated_data):
+        validated_data.pop("assigned_to_ids", None)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        validated_data.pop("assigned_to_ids", None)
+        return super().update(instance, validated_data)
 
     def validate(self, attrs):
         project = attrs.get("project") or getattr(self.instance, "project", None)

@@ -65,17 +65,36 @@ const Dashboard = ({ user, onNavigate, onSelectObject, onOpenReport, onEditProje
   };
 
   useEffect(() => {
-    load();
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setErr("");
+      try {
+        const data = await fetchDashboardStats(period.from, period.to);
+        if (!cancelled) setStats(data);
+      } catch (error) {
+        if (!cancelled) {
+          setStats(null);
+          setErr(error.message || t("dashboard.loadFailed"));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [period.from, period.to, t]);
 
   const projects = stats?.projects || {};
   const periodStats = stats?.period || {};
   const items = projects.items || [];
   const materials = stats?.material_usage || [];
-  const periodJobs = stats?.period_jobs || stats?.today_jobs || [];
+  const periodJobs = stats?.period_jobs || [];
   const monthDelta = Number(periodStats.done_m2_delta || 0);
 
   const completeObject = async (p) => {
+    if (!isAdmin) return;
     const client = p.client || p.name;
     if (!window.confirm(t("dashboard.completeConfirm", { id: p.id, client }))) return;
     setBusyId(p.id);
@@ -91,6 +110,7 @@ const Dashboard = ({ user, onNavigate, onSelectObject, onOpenReport, onEditProje
   };
 
   const deleteObject = async (p) => {
+    if (!isAdmin) return;
     const client = p.client || p.name;
     if (!window.confirm(t("dashboard.deleteConfirm", { id: p.id, client }))) return;
     setBusyId(p.id);
@@ -192,7 +212,7 @@ const Dashboard = ({ user, onNavigate, onSelectObject, onOpenReport, onEditProje
                       <button
                         type="button"
                         className="obj-name"
-                        style={{ background: "none", border: 0, padding: 0, textAlign: "left", flex: 1, cursor: "pointer", fontWeight: 600 }}
+                        style={{ background: "none", border: 0, padding: 0, textAlign: "left", cursor: "pointer", fontWeight: 600 }}
                         onClick={() => onSelectObject && onSelectObject(p.id)}
                       >
                         {label}
@@ -206,7 +226,7 @@ const Dashboard = ({ user, onNavigate, onSelectObject, onOpenReport, onEditProje
                       <span className="obj-pct mono">{pct}%</span>
                       {isAdmin && ui !== "completed" && onEditProject && (
                         <button
-                          className="icon-btn sm"
+                          className="btn btn-sm btn-ghost"
                           title={t("common.edit")}
                           disabled={busyId === p.id}
                           onClick={(e) => {
@@ -214,7 +234,7 @@ const Dashboard = ({ user, onNavigate, onSelectObject, onOpenReport, onEditProje
                             onEditProject(p);
                           }}
                         >
-                          <Icon name="edit" size={13} />
+                          <Icon name="edit" size={13} /> {t("common.edit")}
                         </button>
                       )}
                       {isAdmin && ui !== "completed" && (
@@ -304,8 +324,8 @@ const Dashboard = ({ user, onNavigate, onSelectObject, onOpenReport, onEditProje
 
       <section className="card">
         <div className="card-head">
-          <h2 className="card-title">{t("dashboard.materialUse")}</h2>
-          <span className="muted small">{t("dashboard.neededVsSpent")}</span>
+            <h2 className="card-title">{t("dashboard.materialUsePeriod", { period: periodLabel })}</h2>
+            <span className="muted small">{t("dashboard.neededVsSpent")}</span>
         </div>
         {loading ? (
           <div className="muted small">{t("common.loading")}</div>

@@ -138,6 +138,9 @@ const ObjectDetail = ({ user, objectId, onBack, onNavigate, onOpenReport, onEdit
           {projectAssignees(project).length > 0 && (
             <p className="page-sub">{t("projects.assignee", { name: assigneeNames(project) })}</p>
           )}
+          {isAdmin && !archived && onEdit && (
+            <p className="page-sub muted small">{t("object.editHint")}</p>
+          )}
         </div>
         <div className="page-actions">
           {isAdmin && !archived && onEdit && (
@@ -264,6 +267,7 @@ const ObjectDetail = ({ user, objectId, onBack, onNavigate, onOpenReport, onEdit
           <h2 className="card-title">{t("object.materials")}</h2>
           <button className="link" onClick={() => onNavigate("materials")}>{t("object.openList")}</button>
         </div>
+        <div className="table-scroll">
         <table className="table">
           <thead>
             <tr>
@@ -285,13 +289,13 @@ const ObjectDetail = ({ user, objectId, onBack, onNavigate, onOpenReport, onEdit
               const mp = need ? Math.min(100, Math.round((took / need) * 100)) : 0;
               return (
                 <tr key={row.id}>
-                  <td><strong>{m.name}</strong></td>
-                  <td className="muted small">{m.color || t("common.dash")}</td>
-                  <td className="mono small">{m.per_m2 != null ? `${m.per_m2} ${m.unit}/m²` : t("common.dash")}</td>
-                  <td className="mono">{need} {m.unit}</td>
-                  <td className="mono">{took} {m.unit}</td>
-                  <td className={`mono ${remain <= 0 ? "ok" : ""}`}>{remain <= 0 ? t("object.remainDone") : `${remain} ${m.unit}`}</td>
-                  <td style={{ minWidth: 140 }}>
+                  <td data-label={t("common.material")}><strong>{m.name}</strong></td>
+                  <td className="muted small" data-label={t("object.colorType")}>{m.color || t("common.dash")}</td>
+                  <td className="mono small" data-label={t("object.norma")}>{m.per_m2 != null ? `${m.per_m2} ${m.unit}/m²` : t("common.dash")}</td>
+                  <td className="mono" data-label={t("object.needed")}>{need} {m.unit}</td>
+                  <td className="mono" data-label={t("object.takenCol")}>{took} {m.unit}</td>
+                  <td className={`mono ${remain <= 0 ? "ok" : ""}`} data-label={t("object.remain")}>{remain <= 0 ? t("object.remainDone") : `${remain} ${m.unit}`}</td>
+                  <td data-label={t("object.progress")}>
                     <div className="bar sm"><div className="bar-fill" style={{ width: mp + "%" }} /></div>
                     <div className="mono tiny muted" style={{ marginTop: 3 }}>{mp}%</div>
                   </td>
@@ -303,6 +307,7 @@ const ObjectDetail = ({ user, objectId, onBack, onNavigate, onOpenReport, onEdit
             )}
           </tbody>
         </table>
+        </div>
       </section>
 
       <section className="card">

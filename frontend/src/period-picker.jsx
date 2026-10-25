@@ -6,10 +6,11 @@ import { useI18n } from "./i18n";
 const POP_WIDTH = 320;
 
 const placePop = (anchor) => {
-  if (!anchor) return { top: 0, left: 0 };
+  if (!anchor) return { top: 0, left: 8, width: POP_WIDTH };
   const r = anchor.getBoundingClientRect();
-  const left = Math.min(Math.max(8, r.right - POP_WIDTH), window.innerWidth - POP_WIDTH - 8);
-  return { top: r.bottom + 6, left };
+  const width = Math.min(POP_WIDTH, Math.max(240, window.innerWidth - 16));
+  const left = Math.min(Math.max(8, r.right - width), window.innerWidth - width - 8);
+  return { top: r.bottom + 6, left, width };
 };
 
 const ymd = (y, m, d) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
@@ -134,7 +135,7 @@ const PeriodPicker = ({ value, onChange }) => {
         <Icon name="chevronDown" size={12} />
       </button>
       {open && createPortal(
-        <div className="period-pop" ref={popRef} style={{ top: pos.top, left: pos.left }}>
+        <div className="period-pop" ref={popRef} style={{ top: pos.top, left: pos.left, width: pos.width }}>
           <div className="period-tabs">
             <button className={`pp-tab ${tab === "month" ? "on" : ""}`} onClick={() => setTab("month")}>{t("period.month")}</button>
             <button className={`pp-tab ${tab === "quarter" ? "on" : ""}`} onClick={() => setTab("quarter")}>{t("period.quarter")}</button>

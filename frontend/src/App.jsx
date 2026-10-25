@@ -39,8 +39,8 @@ const MAIN_SECTIONS = new Set([
 ]);
 const ADMIN_ONLY_SECTIONS = new Set(["users", "archive"]);
 
-function defaultSection(user) {
-  return user?.role === "ADMINISTRATORS" ? "dashboard" : "calendar";
+function defaultSection() {
+  return "dashboard";
 }
 
 function readNav() {
@@ -209,6 +209,7 @@ const App = () => {
     setReportId(null);
     setReportReturn(null);
     setSection(s);
+    setMobileNav(false);
   };
 
   const openObjectDetail = (id) => {
@@ -336,7 +337,17 @@ const App = () => {
     );
   } else {
     const sections = {
-      dashboard: <Dashboard key={rev} user={user} onNavigate={navigateSection} onSelectObject={openObjectDetail} onOpenReport={openReport} onEditProject={openEditProject} onProjectsChanged={() => setListRev((r) => r + 1)} />,
+      dashboard: (
+        <Dashboard
+          key={rev}
+          user={user}
+          onNavigate={navigateSection}
+          onSelectObject={openObjectDetail}
+          onOpenReport={openReport}
+          onEditProject={isAdmin ? openEditProject : undefined}
+          onProjectsChanged={isAdmin ? () => setListRev((r) => r + 1) : undefined}
+        />
+      ),
       calendar: <CalendarView key={rev} user={user} onSelectObject={openObjectDetail} />,
       reports: <Reports user={user} onOpenReport={openReport} />,
       tools: <ToolsPage user={user} />,
@@ -361,7 +372,7 @@ const App = () => {
         : section;
 
   return (
-    <div className="app">
+    <div className={`app ${mobileNav ? "nav-open" : ""}`}>
       <div className={`side-stack ${mobileNav ? "open" : ""}`}>
         <Sidebar
           user={user}
@@ -384,9 +395,7 @@ const App = () => {
       {mobileNav && <div className="sidebar-backdrop show" onClick={() => setMobileNav(false)} />}
 
       <main className="main" data-screen-label={section}>
-        <MobileTopbar onOpenSidebar={() => setMobileNav(true)} />
-
-        <div style={{ position: "absolute", top: 24, right: 24, zIndex: 30, display: "flex", alignItems: "center", gap: 10 }}>
+        <MobileTopbar onOpenSidebar={() => setMobileNav(true)}>
           <LanguageSwitch variant="light" />
           {isAdmin && (
             <div className="bell-wrap">
@@ -409,7 +418,7 @@ const App = () => {
               )}
             </div>
           )}
-        </div>
+        </MobileTopbar>
 
         {content}
       </main>

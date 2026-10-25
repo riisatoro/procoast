@@ -29,6 +29,11 @@ const Sidebar = ({ user, currentSection, onNavigate, onLogout, mobileOpen, onClo
           <div className="sb-name">PROCOAT</div>
           <div className="sb-sub">S1 · v1.0</div>
         </div>
+        {onCloseMobile && (
+          <button className="icon-btn sb-close" type="button" onClick={onCloseMobile} aria-label={t("mobile.close")}>
+            <Icon name="x" size={16} />
+          </button>
+        )}
       </div>
 
       <button
