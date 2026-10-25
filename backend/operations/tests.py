@@ -441,6 +441,48 @@ class MaterialReserveTests(TestCase):
         self.assertEqual(Decimal(str(row["reserved"])), Decimal("30"))
         self.assertEqual(Decimal(str(row["available"])), Decimal("60"))
 
+    def test_admin_can_create_warehouse_material_without_project(self):
+        res = self.api.post(
+            "/api/materials/",
+            {
+                "name": "EP99",
+                "color": "RAL9001",
+                "unit": "kg",
+                "warehouse": self.warehouse_a.id,
+                "stock": "25",
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data["name"], "EP99")
+        self.assertEqual(res.data["warehouse"], self.warehouse_a.id)
+        self.assertEqual(Decimal(str(res.data["stock"])), Decimal("25"))
+        self.assertEqual(res.data["linked_projects"], [])
+        self.assertTrue(
+            Material.objects.filter(name="EP99", warehouse=self.warehouse_a).exists()
+        )
+
+    def test_admin_can_create_material_and_link_project(self):
+        res = self.api.post(
+            "/api/materials/",
+            {
+                "name": "EP50",
+                "warehouse": self.warehouse_a.id,
+                "stock": "10",
+                "project": self.project.id,
+                "quantity_needed": "4",
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertTrue(
+            ProjectMaterial.objects.filter(
+                project=self.project,
+                material_id=res.data["id"],
+                quantity_needed=Decimal("4"),
+            ).exists()
+        )
+
     def test_worker_cannot_create_warehouse_material(self):
         worker = User.objects.create_user(
             username="worker",

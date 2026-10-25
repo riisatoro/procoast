@@ -162,10 +162,6 @@ class MaterialSerializer(serializers.ModelSerializer):
         return str(material_available_qty(obj).quantize(Decimal("0.01")))
 
     def validate(self, attrs):
-        if self.instance is None and not attrs.get("project"):
-            raise serializers.ValidationError(
-                {"project": ["Jaunam materiālam jānorāda objekts."]}
-            )
         project = attrs.get("project")
         qty = attrs.get("quantity_needed")
         if self.instance is None and project is not None:

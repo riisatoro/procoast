@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Icon from "./icons";
 import {
+  createMaterial,
   createWarehouse,
   fetchMaterials,
   fetchWarehouses,
@@ -8,7 +9,7 @@ import {
   updateWarehouse,
 } from "./api";
 import { useI18n } from "./i18n";
-import { MaterialForm } from "./material-form";
+import { emptyMaterialForm, MaterialForm } from "./material-form";
 
 const emptyForm = { name: "", location: "", description: "" };
 
@@ -135,6 +136,11 @@ const WarehousesPage = ({ user }) => {
               <Icon name="plus" size={15} /> {t("warehouses.new")}
             </button>
           )}
+          {isAdmin && selected && (
+            <button className="btn btn-primary" onClick={() => setModal({ mode: "material-create" })}>
+              <Icon name="plus" size={15} /> {t("materialsPage.new")}
+            </button>
+          )}
         </div>
       </header>
 
@@ -251,6 +257,21 @@ const WarehousesPage = ({ user }) => {
             setModal(null);
             await load();
             showToast(t("warehouses.saved"));
+          }}
+        />
+      )}
+      {modal?.mode === "material-create" && (
+        <MaterialForm
+          title={t("materialsPage.new")}
+          initial={{ ...emptyMaterialForm, warehouse: warehouseId }}
+          warehouses={warehouses}
+          onClose={() => setModal(null)}
+          onSave={async (payload) => {
+            await createMaterial(payload);
+            setModal(null);
+            await load();
+            if (payload.warehouse) setWarehouseId(String(payload.warehouse));
+            showToast(t("materialsPage.created"));
           }}
         />
       )}
