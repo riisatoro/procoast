@@ -13,8 +13,9 @@ DEBUG = os.environ.get("DEBUG", "1").lower() in ("1", "true", "yes")
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
+    "0.0.0.0",
     "procoast-be",
-    "157.230.96.59",
+    "134.209.214.135",
 ]
 
 INSTALLED_APPS = [
@@ -107,17 +108,20 @@ SIMPLE_JWT = {
 
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3010",
-    "http://127.0.0.1:3010",
-    "http://157.230.96.59",
-    "http://157.230.96.59:3010",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://0.0.0.0:3000",
+    "http://134.209.214.135",
+    "http://134.209.214.135:3000",
 ]
 CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:3010",
-    "http://127.0.0.1:3010",
-    "http://localhost:8010",
-    "http://127.0.0.1:8010",
-    "http://157.230.96.59",
-    "http://157.230.96.59:3010",
-    "http://157.230.96.59:8010",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://0.0.0.0:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://0.0.0.0:8000",
+    "http://134.209.214.135",
+    "http://134.209.214.135:3000",
+    "http://134.209.214.135:8000",
 ]
