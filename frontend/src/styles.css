@@ -153,24 +153,24 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .link:hover { color: var(--green-dark); }
 
 /* ---------- LAYOUT ---------- */
-.app { display: flex; min-height: 100dvh; overflow-x: hidden; }
+.app { display: flex; align-items: stretch; min-height: 100dvh; overflow-x: hidden; }
 
 /* SIDEBAR */
 .side-stack {
   display: flex;
   flex-shrink: 0;
-  height: 100vh;
-  position: sticky;
-  top: 0;
+  align-self: stretch;
   align-items: stretch;
+  min-height: 100dvh;
   z-index: 20;
 }
 .sidebar {
   width: 240px; flex-shrink: 0;
+  align-self: stretch;
   background: #1A1A1A;
   color: #DDD7CC;
   display: flex; flex-direction: column;
-  position: relative; height: 100%;
+  position: relative;
 }
 .projects-rail {
   width: 268px;
@@ -180,18 +180,35 @@ input, select, textarea { font-family: inherit; color: inherit; }
   color: #DDD7CC;
   display: flex;
   flex-direction: column;
+  align-self: stretch;
   min-height: 0;
-  height: 100%;
+}
+.projects-rail.collapsed {
+  width: 48px;
+}
+.projects-rail.collapsed .pr-title,
+.projects-rail.collapsed .pr-count,
+.projects-rail.collapsed .pr-list,
+.projects-rail.collapsed .pr-pager {
+  display: none;
+}
+.projects-rail.collapsed .pr-head {
+  justify-content: center;
+  padding: 14px 6px;
+  border-bottom: 0;
 }
 .pr-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 18px 16px 12px;
+  padding: 14px 12px 12px;
   border-bottom: 1px solid #2A2A2A;
 }
+.pr-toggle { flex-shrink: 0; }
 .pr-title {
+  flex: 1;
+  min-width: 0;
   font-size: 10px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -308,7 +325,7 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .sb-logout:hover { background: #2A2A2A; color: white; }
 
 /* MAIN */
-.main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow-x: hidden; }
+.main { flex: 1; min-width: 0; min-height: 100dvh; align-self: stretch; display: flex; flex-direction: column; overflow-x: hidden; }
 .page { padding: 24px 40px 32px; display: flex; flex-direction: column; gap: 20px; max-width: 1400px; width: 100%; isolation: isolate; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; position: relative; z-index: 5; }
 .page-eyebrow { font-size: 10px; letter-spacing: 0.16em; color: var(--text-soft); font-weight: 700; margin-bottom: 6px; }

@@ -68,6 +68,8 @@ export const messages = {
       page: "{from}–{to} no {total}",
       prev: "Iepriekšējā lapa",
       next: "Nākamā lapa",
+      collapse: "Sakļaut aktīvos objektus",
+      expand: "Izvērst aktīvos objektus",
     },
     login: {
       subtitle: "Iekšējā pārvaldības platforma",
@@ -830,6 +832,8 @@ export const messages = {
       page: "{from}–{to} of {total}",
       prev: "Previous page",
       next: "Next page",
+      collapse: "Collapse active sites",
+      expand: "Expand active sites",
     },
     login: {
       subtitle: "Internal operations platform",

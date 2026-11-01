@@ -592,6 +592,10 @@
     border-left: 0;
     border-top: 1px solid #2A2A2A;
   }
+  .projects-rail.collapsed {
+    width: 100%;
+    min-height: 0;
+  }
   .sidebar-backdrop.show { display: block; }
   .main { width: 100%; }
 }

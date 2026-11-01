@@ -5,13 +5,35 @@ import { STATUS_LABEL, statusClass } from "./projects";
 import { useI18n } from "./i18n";
 
 const PAGE_SIZE = 10;
+const COLLAPSED_KEY = "procoast-rail-collapsed";
 const STATUS_ORDER = { in_progress: 0, in_review: 1, open: 2 };
+
+function readCollapsed() {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 const AdminProjectsSidebar = ({ currentProjectId, onSelect, refreshKey, section }) => {
   const { t } = useI18n();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+
+  const toggleCollapsed = () => {
+    setCollapsed((open) => {
+      const next = !open;
+      try {
+        localStorage.setItem(COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        /* storage can be unavailable */
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -51,8 +73,17 @@ const AdminProjectsSidebar = ({ currentProjectId, onSelect, refreshKey, section 
   const to = Math.min(items.length, (safePage + 1) * PAGE_SIZE);
 
   return (
-    <aside className="projects-rail">
+    <aside className={`projects-rail${collapsed ? " collapsed" : ""}`}>
       <div className="pr-head">
+        <button
+          type="button"
+          className="icon-btn sm pr-page-btn pr-toggle"
+          aria-expanded={!collapsed}
+          title={collapsed ? t("rail.expand") : t("rail.collapse")}
+          onClick={toggleCollapsed}
+        >
+          <Icon name={collapsed ? "chevronRight" : "chevronLeft"} size={14} />
+        </button>
         <div className="pr-title">{t("rail.title")}</div>
         <div className="pr-count mono">{items.length}</div>
       </div>
