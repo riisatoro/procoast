@@ -6,7 +6,7 @@ python manage.py seed_users
 python manage.py load_dump
 python manage.py collectstatic --noinput
 
-WORKERS="${GUNICORN_WORKERS:-3}"
+WORKERS="${GUNICORN_WORKERS:-1}"
 TIMEOUT="${GUNICORN_TIMEOUT:-60}"
 BIND="${GUNICORN_BIND:-0.0.0.0:8000}"
 
